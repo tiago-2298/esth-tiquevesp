@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 import { google } from 'googleapis';
 import { NextResponse } from 'next/server';
 
-// --- CONFIGURATION VESPUCCI ---
+// Configuration des prix (Identique à ton GS)
 const PRICE_LIST = {
   'Petit Tatouage (tête)': 350, 'Moyen Tatouage (tête)': 450, 'Grand Tatouage (tête)': 600,
   'Petit Tatouage (Bras)': 450, 'Moyen Tatouage (Bras)': 600, 'Grand Tatouage (Bras)': 800,
@@ -15,16 +15,7 @@ const PRICE_LIST = {
   'Livraison NORD': 50, 'Livraison SUD': 50
 };
 
-const ENTERPRISES = {
-  'HenHouse': 30, 'Auto Exotic': 30, 'LifeInvader': 30, 'Delight': 30, 'LTD Sandy Shores': 30
-};
-
-const WEBHOOKS = {
-  factures: 'TON_WEBHOOK_DISCORD_FACTURES',
-  depense: 'https://discord.com/api/webhooks/1458467290151653563/SGEnsRQJ2KDDnhUoCRmGp0IRM96o65gP-HVhWrxTzrDef02aS3SwtQKM2WG6iVKE43fs',
-  rh: 'TON_WEBHOOK_RH'
-};
-
+// Accès Google
 async function getAuthSheets() {
   const auth = new google.auth.JWT(
     process.env.GOOGLE_CLIENT_EMAIL,
@@ -41,77 +32,76 @@ export async function POST(request) {
     const sheets = await getAuthSheets();
     const spreadsheetId = process.env.GOOGLE_SHEET_ID;
 
-    // --- RÉCUPÉRATION DES DONNÉES (META) ---
+    // ACTION : Récupérer les employés depuis le Sheet
     if (action === 'getMeta') {
       const res = await sheets.spreadsheets.values.get({
         spreadsheetId,
-        range: "'Factures'!A2:O", // Ajuste selon ton onglet Factures
+        range: "'Factures'!B2:B", // On prend la colonne des employés dans l'onglet Factures
       });
-      
-      // Récupération des employés (Onglet RH ou Factures colonne B)
-      const empRes = await sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range: "'Factures'!B2:B", 
-      });
-      const employees = [...new Set(empRes.data.values?.flat() || [])].filter(Boolean).sort();
-
-      return NextResponse.json({ success: true, employees, prices: PRICE_LIST, enterprises: ENTERPRISES });
+      const employees = [...new Set(res.data.values?.flat() || [])].filter(Boolean).sort();
+      return NextResponse.json({ success: true, employees });
     }
 
-    // --- ENVOI FACTURE ---
+    // ACTION : Envoyer Facture
     if (action === 'sendFactures') {
-      const subtotal = data.items.reduce((acc, i) => acc + (PRICE_LIST[i.desc] * i.qty), 0);
-      const discount = data.discount || 0;
-      const total = subtotal * (1 - discount / 100);
-
-      // Sauvegarde Sheets
+      // 1. Sauvegarde Sheets
       await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: "'Factures'!A:O",
         valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [[new Date().toLocaleDateString('fr-FR'), data.employee, "", data.invoiceNumber, data.enterprise || "", data.customerName || "", "Non", "Remise", discount, subtotal, subtotal-total, total, data.items.length, data.items.map(i=>`${i.desc} (x${i.qty})`).join(', '), new Date().toISOString()]] }
+        requestBody: { values: [[
+          new Date().toLocaleDateString('fr-FR'), data.employee, "", data.invoiceNumber, 
+          data.enterprise || "", data.customerName || "", "Non", "Remise", data.discountPct, 
+          data.subtotal, data.discountAmount, data.total, data.items.length, 
+          data.items.map(i => `${i.n} (x${i.q})`).join('; '), new Date().toISOString()
+        ]] }
       });
 
-      // Discord
-      await fetch(WEBHOOKS.factures, {
+      // 2. Discord
+      await fetch(process.env.WEBHOOK_FACTURES, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           embeds: [{
-            title: `🧾 Facture Vespucci - ${data.invoiceNumber}`,
-            color: 0x06b6d4,
+            title: `🧾 Facture N°${data.invoiceNumber}`,
+            color: 0x0000ff,
             fields: [
-              { name: "Employé", value: data.employee, inline: true },
-              { name: "Client", value: data.customerName || "Inconnu", inline: true },
-              { name: "Total", value: `**${total.toFixed(2)}$**`, inline: true },
-              { name: "Détails", value: data.items.map(i => `• ${i.desc} x${i.qty}`).join('\n') }
-            ]
+              { name: 'Employé', value: data.employee, inline: true },
+              { name: 'Total', value: `**${data.total}$**`, inline: true },
+              { name: 'Détails', value: data.items.map(i => `• ${i.n} x${i.q}`).join('\n') }
+            ],
+            footer: { text: "Vespucci Titanium" },
+            timestamp: new Date().toISOString()
           }]
         })
       });
     }
 
-    // --- ENVOI DÉPENSE ---
-    if (action === 'sendExpense') {
+    // ACTION : Dépense (Onglet Calculation)
+    if (action === 'sendHR' && data.type === 'depense') {
       await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: "'Calculation'!A:H",
         valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [[new Date().toLocaleDateString('fr-FR'), data.employee, "Staff", `DEP-${Date.now()}`, data.details, data.reason, 1, data.amount]] }
+        requestBody: { values: [[
+          new Date(data.date).toLocaleDateString('fr-FR'), data.initiatedBy, "Staff", 
+          `DEP-${Date.now()}`, data.details, data.reason, 1, data.amount
+        ]] }
       });
-
-      await fetch(WEBHOOKS.depense, {
+      
+      await fetch(process.env.WEBHOOK_DEPENSE, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           embeds: [{
-            title: "💸 Nouvelle Dépense",
+            title: "💸 Déclaration de Dépense",
             color: 0x1abc9c,
             fields: [
-              { name: "Montant", value: `${data.amount}$`, inline: true },
-              { name: "Initié par", value: data.employee, inline: true },
-              { name: "Motif", value: data.reason }
-            ]
+              { name: 'Initié par', value: data.initiatedBy, inline: true },
+              { name: 'Montant', value: `${data.amount}$`, inline: true },
+              { name: 'Motif', value: data.reason }
+            ],
+            timestamp: new Date().toISOString()
           }]
         })
       });
