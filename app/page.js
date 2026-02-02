@@ -1,1219 +1,349 @@
-// app/page.jsx
-"use client";
+'use client';
+import { useState, useEffect, useMemo } from 'react';
 
-import React, { useEffect, useMemo, useState } from "react";
+// --- CONFIGURATION FRONT ---
+const APP_NAME = "Vespucci Manager";
+const MODULES = [
+  { id: 'dashboard', l: 'Tableau de bord', e: '📊' },
+  { id: 'caisse', l: 'Caisse & Vente', e: '💎' },
+  { id: 'admin', l: 'Admin & RH', e: '⚖️' },
+  { id: 'annuaire', l: 'Annuaire', e: '📒' },
+  { id: 'expenses', l: 'Frais', e: '💸' }
+];
 
-/* --------------------------------- UTILS -------------------------------- */
-
-const API = async (action, data) => {
-  const res = await fetch("/api", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, data }),
-  });
-  const json = await res.json();
-  if (!json?.success) throw new Error(json?.error || "Erreur serveur");
-  return json;
+// Mappage des icones pour les catégories (Remix Icon mapping simple)
+const CAT_ICONS = {
+  'Tête': '👤', 'Torse/Dos': '👕', 'Bras': '💪', 'Jambes': '🦵',
+  'Custom': '🎨', 'Laser': '🔫', 'Coiffure': '✂️', 'Logistique': '📦'
 };
 
-const randomInvoice = () => `INV-${Math.floor(Math.random() * 1_000_000)}`;
+const HR_TYPES = ['recrutement', 'convocation', 'avertissement', 'licenciement', 'demission'];
 
-function useLocalStorageState(key, initialValue) {
-  const [state, setState] = useState(() => {
-    try {
-      const v = localStorage.getItem(key);
-      return v ? JSON.parse(v) : initialValue;
-    } catch {
-      return initialValue;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(key, JSON.stringify(state));
-    } catch {}
-  }, [key, state]);
-
-  return [state, setState];
-}
-
-const cx = (...c) => c.filter(Boolean).join(" ");
-
-function money(symbol, n) {
-  const v = Number(n || 0);
-  return `${symbol}${v.toFixed(2)}`;
-}
-
-/* ------------------------------- UI ATOMS ------------------------------- */
-
-function Button({ variant = "primary", className = "", ...props }) {
-  return (
-    <button
-      className={cx("btn", `btn-${variant}`, className)}
-      {...props}
-    />
-  );
-}
-
-function Card({ className = "", ...props }) {
-  return <div className={cx("card", className)} {...props} />;
-}
-
-function Field({ label, children }) {
-  return (
-    <div className="field">
-      <div className="label">{label}</div>
-      {children}
-    </div>
-  );
-}
-
-function Badge({ children, tone = "info" }) {
-  return <span className={cx("badge", `badge-${tone}`)}>{children}</span>;
-}
-
-function Modal({ open, onClose, title, children, footer }) {
-  if (!open) return null;
-  return (
-    <div className="modalOverlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modalHead">
-          <div className="modalTitle">{title}</div>
-          <Button variant="ghost" onClick={onClose}>Fermer</Button>
-        </div>
-        <div className="modalBody">{children}</div>
-        {footer ? <div className="modalFoot">{footer}</div> : null}
-      </div>
-    </div>
-  );
-}
-
-function Toast({ toast }) {
-  if (!toast) return null;
-  return (
-    <div className={cx("toast", `toast-${toast.t}`)}>
-      <div className="toastTitle">{toast.t.toUpperCase()}</div>
-      <div className="toastMsg">{toast.m}</div>
-    </div>
-  );
-}
-
-function InitialAvatar({ name }) {
-  const initial = (name || "?").trim().charAt(0).toUpperCase();
-  return (
-    <div className="avatarFallback">
-      {initial}
-    </div>
-  );
-}
-
-/* --------------------------------- PAGE -------------------------------- */
-
-export default function VespucciTitanium() {
-  const [meta, setMeta] = useState(null);
+export default function Home() {
+  const [view, setView] = useState('login'); // login | app
+  const [user, setUser] = useState('');
+  const [currentTab, setCurrentTab] = useState('dashboard');
+  const [data, setData] = useState(null); // Metadata from API
   const [loading, setLoading] = useState(true);
-
-  const [user, setUser] = useLocalStorageState("vespucci_user", "");
-  const [view, setView] = useState(user ? "app" : "login");
-
-  const [tab, setTab] = useState("dashboard");
-  const [toast, setToast] = useState(null);
-
-  // POS
-  const [search, setSearch] = useState("");
-  const [openCat, setOpenCat] = useState(null);
   const [cart, setCart] = useState([]);
-  const [customerName, setCustomerName] = useState("");
-  const [invoiceNumber, setInvoiceNumber] = useState(randomInvoice());
-  const [enterprise, setEnterprise] = useState("");
-  const [discountActivated, setDiscountActivated] = useState(false);
-  const [employeeCard, setEmployeeCard] = useState(false);
+  const [sending, setSending] = useState(false);
+  
+  // State formulaires
+  const [invoiceForm, setInvoiceForm] = useState({ client: '', discount: 0, invoiceNumber: '' });
+  const [hrForm, setHrForm] = useState({ type: 'recrutement', target: '', reason: '' });
+  const [expenseForm, setExpenseForm] = useState({ amount: '', reason: '', file: null });
+  const [adminPin, setAdminPin] = useState('');
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
 
-  // Direction
-  const [adminUnlocked, setAdminUnlocked] = useState(false);
-  const [adminPin, setAdminPin] = useState("");
-
-  // HR Modal
-  const [hrModal, setHrModal] = useState(null);
-  const [hrTarget, setHrTarget] = useState("");
-  const [hrDate, setHrDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [hrReason, setHrReason] = useState("");
-  const [hrDetails, setHrDetails] = useState("");
-
-  const currencySymbol = meta?.currencySymbol || "$";
-  const role = meta?.employeeDiscounts?.[user]?.role || "Employé";
-  const employeeDiscountPct = meta?.employeeDiscounts?.[user]?.discount ?? 0;
-
-  const enterpriseDiscountPct =
-    enterprise && meta?.enterprises?.[enterprise] ? meta.enterprises[enterprise].discount || 0 : 0;
-
-  const appliedDiscountPct = discountActivated
-    ? enterprise
-      ? enterpriseDiscountPct
-      : employeeDiscountPct
-    : 0;
-
-  const discountType = discountActivated ? (enterprise ? "Entreprise" : "Employé") : "Aucune";
-
-  const notify = (m, t = "info") => {
-    setToast({ m, t });
-    setTimeout(() => setToast(null), 3200);
-  };
-
-  const loadMeta = async () => {
+  // --- AUDIO ---
+  const playSound = (type) => {
     try {
-      setLoading(true);
-      const m = await API("getMeta");
-      setMeta(m);
-    } catch (e) {
-      notify(`Erreur chargement: ${e?.message || e}`, "error");
-    } finally {
-      setLoading(false);
-    }
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      const now = ctx.currentTime;
+      if (type === 'click') {
+        osc.frequency.setValueAtTime(800, now); gain.gain.setValueAtTime(0.02, now);
+        osc.stop(now + 0.05);
+      } else if (type === 'success') {
+        osc.frequency.setValueAtTime(600, now); osc.frequency.linearRampToValueAtTime(1200, now + 0.1);
+        gain.gain.setValueAtTime(0.05, now); osc.stop(now + 0.2);
+      }
+      osc.start();
+    } catch (e) {}
   };
 
+  // --- INIT ---
   useEffect(() => {
-    loadMeta();
+    // Générer un ID facture au chargement
+    setInvoiceForm(prev => ({ ...prev, invoiceNumber: 'INV-' + Math.floor(100000 + Math.random() * 900000) }));
+    
+    // Charger les données
+    fetch('/api', { method: 'POST', body: JSON.stringify({ action: 'getMeta' }) })
+      .then(r => r.json())
+      .then(d => { if(d.success) setData(d); setLoading(false); })
+      .catch(() => setLoading(false));
+      
+    // Restaurer session
+    const savedUser = localStorage.getItem('vespucci_user');
+    if(savedUser) { setUser(savedUser); setView('app'); }
   }, []);
 
-  // Derived: filtered categories/products
-  const filteredCategories = useMemo(() => {
-    if (!meta) return [];
-    const q = search.trim().toLowerCase();
-    const cats = Object.keys(meta.productsByCategory || {});
-    if (!q) return cats;
-    return cats.filter((cat) => (meta.productsByCategory[cat] || []).some((p) => p.toLowerCase().includes(q)));
-  }, [meta, search]);
-
-  const productsOfCat = (cat) => {
-    const list = meta?.productsByCategory?.[cat] || [];
-    const q = search.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter((p) => p.toLowerCase().includes(q));
-  };
-
-  // Cart totals
-  const subtotal = useMemo(() => cart.reduce((s, it) => s + it.qty * it.pu, 0), [cart]);
-  const discountAmount = useMemo(
-    () => +(subtotal * (appliedDiscountPct / 100)).toFixed(2),
-    [subtotal, appliedDiscountPct]
-  );
-  const total = useMemo(() => +(subtotal - discountAmount).toFixed(2), [subtotal, discountAmount]);
-
-  const addToCart = (desc) => {
-    if (!meta) return;
-    const pu = meta.prices?.[desc] ?? 0;
-    setCart((prev) => {
-      const idx = prev.findIndex((x) => x.desc === desc);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = { ...next[idx], qty: next[idx].qty + 1 };
-        return next;
-      }
-      return [...prev, { desc, qty: 1, pu }];
+  // --- LOGIC CAISSE ---
+  const addToCart = (item) => {
+    playSound('click');
+    setCart(prev => {
+      const exist = prev.find(i => i.name === item);
+      if (exist) return prev.map(i => i.name === item ? { ...i, qty: i.qty + 1 } : i);
+      return [...prev, { name: item, qty: 1, price: data.prices[item] || 0 }];
     });
   };
 
-  const modQty = (desc, delta) => {
-    setCart((prev) =>
-      prev
-        .map((it) => (it.desc === desc ? { ...it, qty: it.qty + delta } : it))
-        .filter((it) => it.qty > 0)
-    );
+  const removeFromCart = (idx) => {
+    const n = [...cart]; n.splice(idx, 1); setCart(n);
   };
 
-  const clearCart = () => setCart([]);
+  const calculateTotal = () => {
+    const sub = cart.reduce((acc, i) => acc + (i.price * i.qty), 0);
+    const discAmt = (sub * (invoiceForm.discount / 100));
+    return { sub, discAmt, total: sub - discAmt };
+  };
 
-  const submitInvoice = async () => {
-    if (!meta) return;
-    if (!user) return notify("Session invalide", "error");
-    if (cart.length === 0) return notify("Panier vide", "error");
-
+  // --- API CALLS ---
+  const sendAction = async (action, payload) => {
+    if(sending) return;
+    setSending(true);
     try {
-      await API("sendFactures", {
-        employee: user,
-        invoiceNumber,
-        enterprise,
-        customerName,
-        employeeCard,
-        discountActivated,
-        items: cart.map((i) => ({ desc: i.desc, qty: i.qty })),
-      });
+        const res = await fetch('/api', {
+            method: 'POST',
+            body: JSON.stringify({ action, data: { ...payload, author: user } })
+        });
+        const json = await res.json();
+        if(json.success) {
+            playSound('success');
+            alert('Action effectuée avec succès !');
+            // Reset forms
+            if(action === 'sendFacture') { setCart([]); setInvoiceForm(p => ({...p, client: '', invoiceNumber: 'INV-' + Math.floor(Math.random()*1000000)})); }
+            if(action === 'sendHR') setHrForm({ type: 'recrutement', target: '', reason: '' });
+            if(action === 'sendExpense') setExpenseForm({ amount: '', reason: '', file: null });
+        } else {
+            alert('Erreur: ' + json.error);
+        }
+    } catch(e) { alert('Erreur réseau'); }
+    setSending(false);
+  };
 
-      notify("Facture envoyée et enregistrée.", "success");
-      clearCart();
-      setCustomerName("");
-      setInvoiceNumber(randomInvoice());
-      setEnterprise("");
-      setDiscountActivated(false);
-      setEmployeeCard(false);
-    } catch (e) {
-      notify(e?.message || "Erreur envoi facture", "error");
+  const handleExpenseFile = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setExpenseForm({ ...expenseForm, file: reader.result });
+      reader.readAsDataURL(file);
     }
   };
 
-  const openHR = (type) => {
-    const map = {
-      recrutement: { title: "➕ Recrutement", targetLabel: "EMPLOYÉ CIBLE" },
-      convocation: { title: "📋 Convocation", targetLabel: "EMPLOYÉ CIBLE" },
-      avertissement: { title: "⚠️ Avertissement", targetLabel: "EMPLOYÉ CIBLE" },
-      licenciement: { title: "🔴 Licenciement", targetLabel: "EMPLOYÉ CIBLE" },
-      demission: { title: "📝 Démission", targetLabel: "EMPLOYÉ CIBLE" },
-      depense: { title: "💸 Dépense Entreprise", targetLabel: "MONTANT" },
-    };
+  // --- RENDER ---
+  if (loading) return <div style={{height:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#0f0f1a', color:'#06b6d4'}}>CHARGEMENT SYSTÈME...</div>;
 
-    setHrModal({ type, ...map[type] });
-    setHrTarget("");
-    setHrReason("");
-    setHrDetails("");
-    setHrDate(new Date().toISOString().slice(0, 10));
-  };
-
-  const submitHR = async () => {
-    if (!meta) return;
-    if (!user) return notify("Session invalide", "error");
-    if (!hrModal) return;
-
-    try {
-      const isExpense = hrModal.type === "depense";
-      const payload = {
-        type: hrModal.type,
-        initiatedBy: user,
-        reason: hrReason,
-        date: hrDate,
-        details: hrDetails,
-      };
-      if (isExpense) payload.amount = hrTarget;
-      else payload.employeeTarget = hrTarget;
-
-      await API("sendHR", payload);
-
-      notify("Dossier transmis.", "success");
-      setHrModal(null);
-    } catch (e) {
-      notify(e?.message || "Erreur RH", "error");
-    }
-  };
-
-  const logout = () => {
-    setUser("");
-    setView("login");
-    setTab("dashboard");
-    setAdminUnlocked(false);
-    notify("Déconnecté.", "info");
-  };
-
-  // Auto-switch if user exists
-  useEffect(() => {
-    setView(user ? "app" : "login");
-  }, [user]);
-
-  const countItems = cart.reduce((s, i) => s + i.qty, 0);
-
-  if (loading && !meta) {
-    return (
-      <div className="screenCenter">
-        <div className="loaderCard">
-          <div className="loaderTitle">VESPUCCI</div>
-          <div className="loaderSub">Synchronisation Google Sheets...</div>
-          <div className="loaderBar" />
+  if (view === 'login') return (
+    <div className="login-container">
+        <style jsx global>{`
+            :root { --primary: #06b6d4; --bg: #0f0f1a; --panel: rgba(20, 25, 45, 0.8); --text: #f1f5f9; }
+            body { margin: 0; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
+            .login-container { height: 100vh; display: flex; align-items: center; justifyContent: center; background: radial-gradient(circle at 50% 10%, #1e1e3f, #05050a); }
+            .card { background: var(--panel); border: 1px solid rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; width: 400px; text-align: center; backdrop-filter: blur(10px); }
+            .btn { background: linear-gradient(135deg, #06b6d4, #3b82f6); color: white; border: none; padding: 12px; width: 100%; border-radius: 10px; cursor: pointer; font-weight: bold; margin-top: 20px; transition: 0.3s; }
+            .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(6,182,212,0.4); }
+            select { width: 100%; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid #333; color: white; border-radius: 8px; }
+        `}</style>
+        <div className="card">
+            <h1 style={{color:'var(--primary)', marginBottom: 5}}>VESPUCCI</h1>
+            <p style={{color:'#64748b', fontSize:'0.8rem', letterSpacing: 2, marginBottom: 30}}>TITANIUM EDITION</p>
+            <select onChange={(e) => setUser(e.target.value)} value={user}>
+                <option value="">Choisir Identité...</option>
+                {data?.employees?.map(e => <option key={e} value={e}>{e}</option>)}
+            </select>
+            <button className="btn" disabled={!user} onClick={() => { localStorage.setItem('vespucci_user', user); setView('app'); playSound('success'); }}>INITIALISER</button>
         </div>
-      </div>
-    );
-  }
+    </div>
+  );
 
   return (
-    <>
-      <style jsx global>{`
-        :root{
-          --bg0:#05060b;
-          --bg1:#070816;
-          --panel: rgba(14, 18, 35, .62);
-          --panel2: rgba(10, 12, 22, .72);
-          --border: rgba(255,255,255,.08);
-          --border2: rgba(255,255,255,.14);
-          --txt:#eaf0ff;
-          --muted:#a8b3d6;
-          --muted2:#7b86aa;
+    <div className="app">
+        <style jsx global>{`
+            /* STYLES GLOBAUX */
+            .app { display: flex; height: 100vh; }
+            .sidebar { width: 80px; background: rgba(10,10,15,0.9); display: flex; flex-direction: column; align-items: center; padding: 20px 0; border-right: 1px solid rgba(255,255,255,0.05); z-index: 10; transition: width 0.3s; }
+            .sidebar:hover { width: 220px; }
+            .nav-item { width: 90%; padding: 15px; margin-bottom: 5px; border-radius: 12px; color: #94a3b8; cursor: pointer; display: flex; align-items: center; overflow: hidden; white-space: nowrap; transition: 0.2s; }
+            .nav-item:hover, .nav-item.active { background: rgba(6, 182, 212, 0.1); color: var(--primary); }
+            .nav-icon { font-size: 1.5rem; min-width: 50px; text-align: center; }
+            .main { flex: 1; padding: 30px; overflow-y: auto; background: radial-gradient(circle at top right, #1a1a2e, #0f0f1a); }
+            
+            .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; }
+            .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 20px; border-radius: 16px; transition: 0.2s; }
+            .card:hover { border-color: var(--primary); transform: translateY(-3px); }
+            
+            .inp { width: 100%; padding: 12px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white; margin-bottom: 10px; }
+            .inp:focus { border-color: var(--primary); outline: none; }
+            
+            .btn-p { background: var(--primary); color: #000; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; }
+            .btn-red { background: #ef4444; color: #fff; border: none; padding: 8px; border-radius: 6px; cursor: pointer; }
+            
+            /* Caisse */
+            .pos-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; height: calc(100vh - 60px); }
+            .product-btn { background: rgba(255,255,255,0.05); border: 1px solid transparent; padding: 15px; border-radius: 10px; text-align: center; cursor: pointer; display: flex; flex-direction: column; gap: 5px; align-items: center; justify-content: center; height: 100px; }
+            .product-btn:hover { background: rgba(6, 182, 212, 0.15); border-color: var(--primary); }
+            .ticket { background: #000; border: 1px solid #333; padding: 20px; border-radius: 12px; display: flex; flex-direction: column; }
+        `}</style>
 
-          --c1:#06b6d4;
-          --c2:#3b82f6;
-          --c3:#8b5cf6;
-          --ok:#10b981;
-          --err:#ef4444;
-          --warn:#f59e0b;
-
-          --shadow: 0 22px 60px rgba(0,0,0,.55);
-          --radius: 18px;
-          --radius2: 24px;
-          --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-          --ui: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-        }
-
-        *{ box-sizing:border-box; }
-        body{
-          margin:0;
-          color:var(--txt);
-          font-family:var(--ui);
-          min-height:100vh;
-          background:
-            radial-gradient(1200px 600px at 20% 0%, rgba(59,130,246,.25), transparent 55%),
-            radial-gradient(900px 500px at 90% 20%, rgba(139,92,246,.22), transparent 58%),
-            radial-gradient(900px 700px at 40% 90%, rgba(6,182,212,.18), transparent 60%),
-            linear-gradient(180deg, var(--bg1), var(--bg0));
-          overflow-x:hidden;
-        }
-
-        .screenCenter{
-          min-height:100vh;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          padding:20px;
-        }
-
-        .loaderCard{
-          width:min(520px, 94vw);
-          padding:26px;
-          border:1px solid var(--border);
-          border-radius:var(--radius2);
-          background: var(--panel);
-          box-shadow: var(--shadow);
-          backdrop-filter: blur(18px) saturate(160%);
-        }
-        .loaderTitle{ font-weight:900; letter-spacing:.18em; font-size:20px; }
-        .loaderSub{ margin-top:8px; color:var(--muted); }
-        .loaderBar{
-          height:10px; border-radius:999px;
-          margin-top:16px;
-          background: linear-gradient(90deg, rgba(6,182,212,.15), rgba(59,130,246,.5), rgba(139,92,246,.15));
-          position:relative;
-          overflow:hidden;
-        }
-        .loaderBar:before{
-          content:"";
-          position:absolute; inset:0;
-          background: linear-gradient(90deg, transparent, rgba(255,255,255,.22), transparent);
-          transform: translateX(-100%);
-          animation: shimmer 1.1s infinite;
-        }
-        @keyframes shimmer{ to{ transform: translateX(100%); } }
-
-        .app{
-          max-width: 1400px;
-          margin: 0 auto;
-          padding: 18px;
-          padding-bottom: 80px;
-        }
-
-        .topbar{
-          position: sticky;
-          top: 12px;
-          z-index: 40;
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap: 14px;
-          padding: 14px 14px;
-          border-radius: var(--radius2);
-          border: 1px solid var(--border);
-          background: rgba(10, 12, 22, .62);
-          backdrop-filter: blur(18px) saturate(170%);
-          box-shadow: 0 10px 40px rgba(0,0,0,.35);
-        }
-
-        .brand{
-          display:flex; align-items:center; gap:12px;
-          cursor:pointer;
-          user-select:none;
-        }
-        .brandLogo{
-          width:42px; height:42px;
-          border-radius: 14px;
-          background: linear-gradient(135deg, var(--c1), var(--c2));
-          box-shadow: 0 10px 25px rgba(6,182,212,.22);
-          display:flex; align-items:center; justify-content:center;
-          font-weight:900;
-        }
-        .brandTitle{ font-weight:900; letter-spacing:.12em; }
-        .brandSub{ font-size:12px; color:var(--muted); margin-top:2px; }
-
-        .tabs{
-          display:flex; gap:10px;
-          flex-wrap:wrap;
-          justify-content:center;
-        }
-
-        .userBox{
-          display:flex; align-items:center; gap:12px;
-        }
-        .userName{ font-weight:900; text-align:right; }
-        .userRole{ font-size:12px; color: rgba(6,182,212,.95); font-weight:900; text-align:right; }
-
-        .card{
-          background: var(--panel);
-          border: 1px solid var(--border);
-          border-top: 1px solid var(--border2);
-          border-radius: var(--radius2);
-          box-shadow: var(--shadow);
-          backdrop-filter: blur(18px) saturate(160%);
-        }
-
-        .btn{
-          height: 44px;
-          padding: 0 14px;
-          border-radius: 14px;
-          border: 1px solid transparent;
-          font-weight: 900;
-          letter-spacing: .06em;
-          text-transform: uppercase;
-          cursor:pointer;
-          display:inline-flex;
-          align-items:center;
-          justify-content:center;
-          gap:10px;
-          transition: transform .12s ease, filter .12s ease, border-color .12s ease;
-          user-select:none;
-        }
-        .btn:active{ transform: translateY(1px); }
-        .btn-primary{
-          background: linear-gradient(135deg, var(--c1), var(--c2));
-          color:white;
-          box-shadow: 0 12px 28px rgba(59,130,246,.18);
-        }
-        .btn-ghost{
-          background: rgba(255,255,255,.04);
-          border-color: var(--border);
-          color: var(--muted);
-        }
-        .btn-danger{
-          background: rgba(239,68,68,.12);
-          border-color: rgba(239,68,68,.22);
-          color: #ffb4b4;
-        }
-
-        input, select, textarea{
-          width: 100%;
-          border-radius: 14px;
-          border: 1px solid var(--border);
-          background: rgba(0,0,0,.35);
-          padding: 12px 12px;
-          color: var(--txt);
-          outline:none;
-          font-family: var(--ui);
-        }
-        textarea{ resize: vertical; min-height: 104px; }
-
-        .field .label{
-          font-size: 11px;
-          letter-spacing: .16em;
-          font-weight: 900;
-          color: var(--muted2);
-          margin: 6px 0 8px;
-        }
-
-        .badge{
-          display:inline-flex;
-          align-items:center;
-          padding: 6px 10px;
-          border-radius: 999px;
-          font-size: 12px;
-          font-weight: 900;
-          letter-spacing: .05em;
-          border: 1px solid var(--border);
-          background: rgba(255,255,255,.04);
-          color: var(--muted);
-        }
-        .badge-info{ border-color: rgba(6,182,212,.24); color: rgba(6,182,212,.95); background: rgba(6,182,212,.08); }
-        .badge-ok{ border-color: rgba(16,185,129,.24); color: rgba(16,185,129,.95); background: rgba(16,185,129,.08); }
-        .badge-warn{ border-color: rgba(245,158,11,.24); color: rgba(245,158,11,.95); background: rgba(245,158,11,.08); }
-
-        .grid{
-          display:grid;
-          gap: 16px;
-        }
-        .gridDash{
-          grid-template-columns: repeat(4, 1fr);
-        }
-
-        .widget{
-          padding: 18px;
-          border-radius: var(--radius2);
-          border: 1px solid var(--border);
-          background: rgba(14, 18, 35, .42);
-          cursor:pointer;
-          transition: transform .15s ease, border-color .15s ease;
-          min-height: 150px;
-          display:flex;
-          flex-direction:column;
-          justify-content:space-between;
-        }
-        .widget:hover{
-          transform: translateY(-2px);
-          border-color: rgba(6,182,212,.35);
-        }
-        .widgetBig{ grid-column: span 2; grid-row: span 2; min-height: 316px; }
-        .widgetWide{ grid-column: span 4; min-height: 92px; cursor: default; }
-
-        .stat{
-          font-family: var(--mono);
-          font-size: 34px;
-          font-weight: 900;
-        }
-        .muted{ color: var(--muted); }
-        .mono{ font-family: var(--mono); }
-
-        .pos{
-          display:grid;
-          grid-template-columns: 2fr 1.1fr;
-          gap: 16px;
-          align-items: start;
-        }
-
-        .catalog{
-          padding: 14px;
-          overflow: hidden;
-        }
-        .catalogTop{
-          display:flex;
-          gap: 10px;
-          margin-bottom: 10px;
-        }
-
-        .accordion{
-          overflow-y: auto;
-          max-height: calc(100vh - 200px);
-          padding-right: 6px;
-        }
-        .cat{
-          border: 1px solid var(--border);
-          border-radius: 16px;
-          overflow: hidden;
-          background: rgba(0,0,0,.20);
-          margin-bottom: 10px;
-        }
-        .catHead{
-          padding: 14px 14px;
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          cursor:pointer;
-        }
-        .catHead:hover{ background: rgba(255,255,255,.03); }
-        .catBody{
-          padding: 12px;
-          display:grid;
-          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-          gap: 10px;
-        }
-        .prod{
-          border: 1px solid var(--border);
-          border-radius: 14px;
-          padding: 12px;
-          background: rgba(255,255,255,.03);
-          cursor:pointer;
-          transition: border-color .12s ease, transform .12s ease;
-          text-align:center;
-        }
-        .prod:hover{
-          border-color: rgba(6,182,212,.35);
-          transform: translateY(-1px);
-        }
-        .price{
-          margin-top: 8px;
-          font-family: var(--mono);
-          font-weight: 900;
-          color: rgba(6,182,212,.95);
-        }
-
-        .ticket{
-          border-radius: var(--radius2);
-          border: 1px solid var(--border);
-          background: var(--panel2);
-          overflow: hidden;
-        }
-        .ticketHead{
-          padding: 16px;
-          border-bottom: 1px dashed rgba(255,255,255,.12);
-        }
-        .ticketBody{
-          padding: 14px;
-          max-height: calc(100vh - 420px);
-          overflow-y: auto;
-        }
-        .ticketFoot{
-          padding: 16px;
-          border-top: 1px solid rgba(255,255,255,.08);
-          background: rgba(8,10,18,.72);
-          position: sticky;
-          bottom: 0;
-        }
-
-        .cartItem{
-          padding: 12px;
-          border-radius: 16px;
-          border: 1px solid rgba(255,255,255,.07);
-          background: rgba(255,255,255,.03);
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap: 10px;
-          margin-bottom: 10px;
-        }
-
-        .qty{
-          display:flex;
-          align-items:center;
-          gap: 8px;
-        }
-        .qtyBtn{
-          width: 40px;
-          height: 40px;
-          padding:0;
-        }
-
-        .row{
-          display:flex;
-          justify-content:space-between;
-          margin-bottom: 8px;
-          color: var(--muted);
-          font-size: 14px;
-        }
-        .row strong{ color: var(--txt); }
-
-        .toast{
-          position: fixed;
-          right: 18px;
-          bottom: 18px;
-          z-index: 99;
-          min-width: 260px;
-          max-width: 360px;
-          padding: 14px 14px;
-          border-radius: 18px;
-          border: 1px solid var(--border);
-          background: rgba(10,12,22,.84);
-          backdrop-filter: blur(14px);
-          box-shadow: 0 16px 40px rgba(0,0,0,.45);
-        }
-        .toastTitle{ font-weight: 900; letter-spacing: .12em; font-size: 12px; }
-        .toastMsg{ margin-top: 6px; color: var(--muted); }
-        .toast-info .toastTitle{ color: rgba(6,182,212,.95); }
-        .toast-success .toastTitle{ color: rgba(16,185,129,.95); }
-        .toast-error .toastTitle{ color: rgba(239,68,68,.95); }
-
-        .modalOverlay{
-          position: fixed; inset:0;
-          z-index: 80;
-          background: rgba(0,0,0,.72);
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          padding: 18px;
-        }
-        .modal{
-          width: min(560px, 95vw);
-          border-radius: var(--radius2);
-          border: 1px solid var(--border);
-          background: rgba(12,14,26,.86);
-          backdrop-filter: blur(18px) saturate(160%);
-          box-shadow: var(--shadow);
-          overflow:hidden;
-        }
-        .modalHead{
-          padding: 14px 14px;
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          border-bottom: 1px solid rgba(255,255,255,.08);
-        }
-        .modalTitle{ font-weight: 900; letter-spacing: .08em; }
-        .modalBody{ padding: 14px; }
-        .modalFoot{ padding: 14px; border-top: 1px solid rgba(255,255,255,.08); }
-
-        .avatarFallback{
-          width: 74px; height: 74px;
-          border-radius: 999px;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          font-weight: 900;
-          font-size: 28px;
-          border: 1px solid rgba(255,255,255,.14);
-          background: linear-gradient(135deg, rgba(6,182,212,.25), rgba(59,130,246,.25));
-        }
-
-        .directoryGrid{
-          display:grid;
-          grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-          gap: 14px;
-        }
-
-        @media (max-width: 980px){
-          .gridDash{ grid-template-columns: repeat(2, 1fr); }
-          .widgetWide{ grid-column: span 2; }
-          .pos{ grid-template-columns: 1fr; }
-          .accordion{ max-height: 56vh; }
-          .ticketBody{ max-height: 36vh; }
-        }
-      `}</style>
-
-      <Toast toast={toast} />
-
-      {/* ------------------------------ LOGIN ------------------------------ */}
-      {view === "login" ? (
-        <div className="screenCenter">
-          <Card className="loaderCard">
-            <div className="loaderTitle">VESPUCCI</div>
-            <div className="loaderSub">Titanium Terminal • v{meta?.version || "—"}</div>
-
-            <div style={{ marginTop: 16 }}>
-              <Field label="IDENTIFIANT (Sheets)">
-                <select value={user} onChange={(e) => setUser(e.target.value)}>
-                  <option value="">Choisir une identité...</option>
-                  {meta?.employees?.map((e) => (
-                    <option key={e} value={e}>
-                      {e}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                <Button
-                  variant="primary"
-                  disabled={!user}
-                  onClick={() => {
-                    if (!user) return;
-                    setView("app");
-                    notify(`Bienvenue ${user}`, "success");
-                  }}
-                >
-                  Initialiser la session
-                </Button>
-
-                <Button variant="ghost" onClick={loadMeta}>
-                  Synchroniser Sheet
-                </Button>
-              </div>
+        <div className="sidebar">
+            <div style={{fontSize:'2rem', marginBottom: 30, color: 'var(--primary)'}}>💎</div>
+            {MODULES.map(m => (
+                <div key={m.id} className={`nav-item ${currentTab === m.id ? 'active' : ''}`} onClick={() => setCurrentTab(m.id)}>
+                    <span className="nav-icon">{m.e}</span>
+                    <span style={{fontWeight: 600}}>{m.l}</span>
+                </div>
+            ))}
+            <div style={{marginTop: 'auto'}} className="nav-item" onClick={() => setView('login')}>
+                <span className="nav-icon">🚪</span>
+                <span>Déconnexion</span>
             </div>
-          </Card>
         </div>
-      ) : (
-        <div className="app">
-          {/* ------------------------------ TOPBAR ------------------------------ */}
-          <header className="topbar">
-            <div className="brand" onClick={() => setTab("dashboard")}>
-              <div className="brandLogo">V</div>
-              <div>
-                <div className="brandTitle">VESPUCCI</div>
-                <div className="brandSub">Manager • v{meta?.version || "—"}</div>
-              </div>
-            </div>
 
-            <div className="tabs">
-              <Button variant={tab === "dashboard" ? "primary" : "ghost"} onClick={() => setTab("dashboard")}>
-                Dashboard
-              </Button>
-              <Button variant={tab === "invoice" ? "primary" : "ghost"} onClick={() => setTab("invoice")}>
-                Caisse
-              </Button>
-              <Button variant={tab === "direction" ? "primary" : "ghost"} onClick={() => setTab("direction")}>
-                Direction
-              </Button>
-              <Button variant={tab === "annuaire" ? "primary" : "ghost"} onClick={() => setTab("annuaire")}>
-                Annuaire
-              </Button>
-            </div>
-
-            <div className="userBox">
-              <div>
-                <div className="userName">{user}</div>
-                <div className="userRole">{role}</div>
-              </div>
-              <Button variant="danger" onClick={logout}>
-                Off
-              </Button>
-            </div>
-          </header>
-
-          {/* ------------------------------ DASHBOARD ------------------------------ */}
-          {tab === "dashboard" && (
-            <div style={{ marginTop: 16 }}>
-              <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+        <div className="main">
+            {/* DASHBOARD */}
+            {currentTab === 'dashboard' && (
                 <div>
-                  <div style={{ fontSize: 30, fontWeight: 900, letterSpacing: "-.02em" }}>Aperçu Global</div>
-                  <div className="muted">
-                    Employés: <span className="mono">{meta?.totals?.employees || 0}</span> • Produits:{" "}
-                    <span className="mono">{meta?.totals?.products || 0}</span>
-                  </div>
-                </div>
-                <Button variant="ghost" onClick={loadMeta}>Sync Sheet</Button>
-              </div>
-
-              <div className="grid gridDash">
-                <div className="widget widgetBig" onClick={() => setTab("invoice")}>
-                  <div>
-                    <Badge tone="info">MODULE VENTE</Badge>
-                    <div className="stat" style={{ marginTop: 12 }}>CAISSE</div>
-                    <div className="muted" style={{ marginTop: 8 }}>
-                      Catalogue • Factures • Remises
-                    </div>
-                  </div>
-                  <Button variant="primary">Ouvrir</Button>
-                </div>
-
-                <div className="widget" onClick={() => setTab("direction")}>
-                  <Badge tone="warn">ADMIN</Badge>
-                  <div className="stat">RH</div>
-                  <div className="muted">Dossiers staff & dépenses</div>
-                </div>
-
-                <div className="widget" onClick={() => setTab("annuaire")}>
-                  <Badge tone="ok">CONTACTS</Badge>
-                  <div className="stat">TEL</div>
-                  <div className="muted">Annuaire depuis Sheets</div>
-                </div>
-
-                <div className="widget widgetWide">
-                  <div>
-                    <div style={{ fontWeight: 900, letterSpacing: ".08em" }}>SYSTÈME OPÉRATIONNEL</div>
-                    <div className="muted">Données live depuis Google Sheets</div>
-                  </div>
-                  <div className="mono" style={{ color: "rgba(6,182,212,.95)", fontWeight: 900 }}>
-                    {new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ------------------------------ CAISSE ------------------------------ */}
-          {tab === "invoice" && (
-            <div style={{ marginTop: 16 }}>
-              <div className="pos">
-                <Card className="catalog">
-                  <div className="catalogTop">
-                    <input
-                      placeholder="Rechercher un service..."
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setSearch("");
-                        setOpenCat(null);
-                      }}
-                    >
-                      Reset
-                    </Button>
-                  </div>
-
-                  <div className="accordion">
-                    {filteredCategories.map((cat) => (
-                      <div className="cat" key={cat}>
-                        <div
-                          className="catHead"
-                          onClick={() => setOpenCat((prev) => (prev === cat ? null : cat))}
-                        >
-                          <div style={{ fontWeight: 900 }}>{cat}</div>
-                          <div className="muted">{openCat === cat ? "▲" : "▼"}</div>
+                    <h1 style={{fontSize:'3rem', marginBottom: 10}}>Bonjour, {user.split(' ')[0]}</h1>
+                    <p style={{color:'#94a3b8', marginBottom: 40}}>Terminal Vespucci v5.0 opérationnel.</p>
+                    
+                    <div className="grid">
+                        <div className="card" onClick={() => setCurrentTab('caisse')} style={{cursor:'pointer', background:'linear-gradient(135deg, rgba(6,182,212,0.1), transparent)'}}>
+                            <h3 style={{color:'var(--primary)'}}>💎 Nouvelle Vente</h3>
+                            <p style={{fontSize:'0.9rem', color:'#94a3b8'}}>Accéder au catalogue</p>
                         </div>
-
-                        {openCat === cat && (
-                          <div className="catBody">
-                            {productsOfCat(cat).map((p) => (
-                              <div key={p} className="prod" onClick={() => addToCart(p)}>
-                                <div style={{ fontWeight: 900, fontSize: 13 }}>{p}</div>
-                                <div className="price">{money(currencySymbol, meta?.prices?.[p] ?? 0)}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-
-                <div className="ticket">
-                  <div className="ticketHead">
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                      <div style={{ fontWeight: 900, letterSpacing: ".12em" }}>TICKET</div>
-                      <Badge tone="info">{countItems} items</Badge>
-                    </div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
-                      <Field label="CLIENT">
-                        <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
-                      </Field>
-                      <Field label="ID FACTURE">
-                        <input value={invoiceNumber} readOnly className="mono" style={{ opacity: 0.75 }} />
-                      </Field>
-                    </div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <Field label="ENTREPRISE">
-                        <select value={enterprise} onChange={(e) => setEnterprise(e.target.value)}>
-                          <option value="">Aucune entreprise</option>
-                          {Object.keys(meta?.enterprises || {}).map((k) => (
-                            <option key={k} value={k}>
-                              {k} (-{meta?.enterprises?.[k]?.discount ?? 0}%)
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-
-                      <Field label="OPTIONS">
-                        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                          <label style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--muted)", fontWeight: 900 }}>
-                            <input type="checkbox" checked={discountActivated} onChange={(e) => setDiscountActivated(e.target.checked)} />
-                            Remise
-                          </label>
-                          <label style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--muted)", fontWeight: 900 }}>
-                            <input type="checkbox" checked={employeeCard} onChange={(e) => setEmployeeCard(e.target.checked)} />
-                            Carte
-                          </label>
+                        <div className="card">
+                            <h3>📞 Annuaire</h3>
+                            <p style={{fontSize:'1.5rem', fontWeight:'bold'}}>{data?.employees?.length || 0} Employés</p>
                         </div>
-                      </Field>
                     </div>
-
-                    <div className="muted" style={{ marginTop: 6 }}>
-                      Remise: <b style={{ color: "var(--txt)" }}>{discountType}</b> •{" "}
-                      <b style={{ color: "rgba(6,182,212,.95)" }}>{appliedDiscountPct}%</b>
-                    </div>
-                  </div>
-
-                  <div className="ticketBody">
-                    {cart.length === 0 ? (
-                      <div className="muted" style={{ textAlign: "center", marginTop: 18 }}>
-                        Panier vide
-                      </div>
-                    ) : (
-                      cart.map((it) => (
-                        <div key={it.desc} className="cartItem">
-                          <div>
-                            <div style={{ fontWeight: 900 }}>{it.desc}</div>
-                            <div className="muted mono" style={{ marginTop: 4 }}>
-                              {money(currencySymbol, it.pu)} × {it.qty}
-                            </div>
-                          </div>
-                          <div className="qty">
-                            <Button className="qtyBtn" variant="ghost" onClick={() => modQty(it.desc, -1)}>-</Button>
-                            <Button className="qtyBtn" variant="ghost" onClick={() => modQty(it.desc, +1)}>+</Button>
-                            <Button className="qtyBtn" variant="danger" onClick={() => modQty(it.desc, -999)}>✕</Button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  <div className="ticketFoot">
-                    <div className="row">
-                      <span>Sous-total</span>
-                      <strong className="mono">{money(currencySymbol, subtotal)}</strong>
-                    </div>
-                    <div className="row">
-                      <span>Remise ({appliedDiscountPct}%)</span>
-                      <strong className="mono" style={{ color: "rgba(16,185,129,.95)" }}>
-                        -{money(currencySymbol, discountAmount)}
-                      </strong>
-                    </div>
-                    <div className="row" style={{ paddingTop: 10, marginTop: 10, borderTop: "1px solid rgba(255,255,255,.10)" }}>
-                      <span style={{ fontWeight: 900, letterSpacing: ".14em" }}>TOTAL NET</span>
-                      <strong className="mono" style={{ color: "rgba(6,182,212,.95)", fontSize: 18 }}>
-                        {money(currencySymbol, total)}
-                      </strong>
-                    </div>
-
-                    <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-                      <Button variant="primary" onClick={submitInvoice}>Encaisser</Button>
-                      <Button variant="ghost" onClick={clearCart}>Vider panier</Button>
-                    </div>
-                  </div>
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* ------------------------------ DIRECTION ------------------------------ */}
-          {tab === "direction" && (
-            <div style={{ marginTop: 16 }}>
-              {!adminUnlocked ? (
-                <Card style={{ maxWidth: 560, margin: "56px auto", padding: 18, borderColor: "rgba(239,68,68,.22)" }}>
-                  <div style={{ fontWeight: 900, fontSize: 20, letterSpacing: ".08em" }}>Accès Direction</div>
-                  <div className="muted" style={{ marginTop: 6 }}>
-                    Authentification requise (PIN vient du Sheet : <b>Config → ADMIN_PIN</b>)
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, marginTop: 14 }}>
-                    <input placeholder="CODE PIN" value={adminPin} onChange={(e) => setAdminPin(e.target.value)} />
-                    <Button
-                      variant="primary"
-                      onClick={() => {
-                        const pinSheet = meta?.ui?.adminPin || "";
-                        if (pinSheet && adminPin === pinSheet) {
-                          setAdminUnlocked(true);
-                          notify("Accès accordé", "success");
-                        } else {
-                          notify("Code incorrect", "error");
-                        }
-                      }}
-                    >
-                      OK
-                    </Button>
-                  </div>
-
-                  <div style={{ marginTop: 12 }}>
-                    <Button variant="ghost" onClick={loadMeta}>Resync Sheet</Button>
-                  </div>
-                </Card>
-              ) : (
-                <>
-                  <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-                    <div>
-                      <div style={{ fontSize: 30, fontWeight: 900 }}>Panel Direction</div>
-                      <div className="muted">RH + Dépenses (Sheets + Discord)</div>
-                    </div>
-                    <Button variant="ghost" onClick={() => { setAdminUnlocked(false); setAdminPin(""); }}>
-                      Verrouiller
-                    </Button>
-                  </div>
-
-                  <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
-                    <div className="widget" onClick={() => openHR("recrutement")}>
-                      <Badge tone="ok">RH</Badge>
-                      <div className="stat">➕</div>
-                      <div className="muted">Recrutement</div>
-                    </div>
-                    <div className="widget" onClick={() => openHR("convocation")}>
-                      <Badge tone="info">RH</Badge>
-                      <div className="stat">📋</div>
-                      <div className="muted">Convocation</div>
-                    </div>
-                    <div className="widget" onClick={() => openHR("avertissement")}>
-                      <Badge tone="warn">RH</Badge>
-                      <div className="stat">⚠️</div>
-                      <div className="muted">Avertissement</div>
-                    </div>
-                    <div className="widget" onClick={() => openHR("licenciement")}>
-                      <Badge tone="warn">RH</Badge>
-                      <div className="stat" style={{ color: "rgba(239,68,68,.95)" }}>⛔</div>
-                      <div className="muted">Licenciement</div>
-                    </div>
-                    <div className="widget" onClick={() => openHR("demission")}>
-                      <Badge tone="info">RH</Badge>
-                      <div className="stat">📝</div>
-                      <div className="muted">Démission</div>
-                    </div>
-
-                    <div className="widget" style={{ gridColumn: "span 2" }} onClick={() => openHR("depense")}>
-                      <Badge tone="ok">FINANCE</Badge>
-                      <div className="stat">💸</div>
-                      <div className="muted">Déclaration de dépense</div>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* ------------------------------ ANNUAIRE ------------------------------ */}
-          {tab === "annuaire" && (
-            <div style={{ marginTop: 16 }}>
-              <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-                <div>
-                  <div style={{ fontSize: 30, fontWeight: 900 }}>Répertoire</div>
-                  <div className="muted">Données récupérées depuis Google Sheets</div>
-                </div>
-                <Button variant="ghost" onClick={loadMeta}>Sync</Button>
-              </div>
-
-              <div className="directoryGrid">
-                {(meta?.directory || []).map((c) => (
-                  <Card key={c.name} style={{ padding: 16, textAlign: "center" }}>
-                    {c.avatar ? (
-                      <img
-                        src={c.avatar}
-                        alt={c.name}
-                        style={{
-                          width: 74,
-                          height: 74,
-                          borderRadius: 999,
-                          objectFit: "cover",
-                          border: "1px solid rgba(255,255,255,.14)",
-                          marginBottom: 10,
-                        }}
-                      />
-                    ) : (
-                      <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}>
-                        <InitialAvatar name={c.name} />
-                      </div>
-                    )}
-
-                    <div style={{ fontWeight: 900 }}>{c.name}</div>
-                    <div style={{ marginTop: 6 }}>
-                      <Badge tone="info">{c.role || "—"}</Badge>
-                    </div>
-
-                    <div className="mono muted" style={{ marginTop: 10 }}>
-                      {c.phone || "—"}
-                    </div>
-
-                    <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                      <Button
-                        variant="ghost"
-                        onClick={async () => {
-                          if (!c.phone) return notify("Numéro manquant", "error");
-                          await navigator.clipboard.writeText(c.phone);
-                          notify("Numéro copié", "success");
-                        }}
-                      >
-                        Copier
-                      </Button>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ------------------------------ HR MODAL ------------------------------ */}
-          <Modal
-            open={!!hrModal}
-            onClose={() => setHrModal(null)}
-            title={hrModal?.title || "RH"}
-            footer={
-              <Button variant="primary" onClick={submitHR}>
-                Confirmer l'envoi
-              </Button>
-            }
-          >
-            {hrModal && (
-              <div className="grid" style={{ gap: 12 }}>
-                <Field label={hrModal.targetLabel}>
-                  <input
-                    placeholder={hrModal.type === "depense" ? "ex: 325.75" : "Nom Prénom"}
-                    value={hrTarget}
-                    onChange={(e) => setHrTarget(e.target.value)}
-                  />
-                </Field>
-
-                <Field label="DATE EFFECTIVE">
-                  <input type="date" value={hrDate} onChange={(e) => setHrDate(e.target.value)} />
-                </Field>
-
-                <Field label="MOTIF / DESCRIPTION">
-                  <textarea value={hrReason} onChange={(e) => setHrReason(e.target.value)} />
-                </Field>
-
-                <Field label={hrModal.type === "depense" ? "ENTREPRISE / FOURNISSEUR" : "DÉTAILS (OPTIONNEL)"}>
-                  <input value={hrDetails} onChange={(e) => setHrDetails(e.target.value)} />
-                </Field>
-              </div>
             )}
-          </Modal>
+
+            {/* CAISSE */}
+            {currentTab === 'caisse' && (
+                <div className="pos-layout">
+                    <div style={{overflowY: 'auto', paddingRight: 10}}>
+                        {Object.entries(data?.productsByCategory || {}).map(([cat, products]) => (
+                            <div key={cat} style={{marginBottom: 20}}>
+                                <h3 style={{color:'var(--primary)', marginBottom: 10, borderBottom:'1px solid rgba(255,255,255,0.1)', paddingBottom:5}}>
+                                    {CAT_ICONS[cat] || '📦'} {cat}
+                                </h3>
+                                <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(140px, 1fr))', gap: 10}}>
+                                    {products.map(p => (
+                                        <div key={p} className="product-btn" onClick={() => addToCart(p)}>
+                                            <div style={{fontSize:'0.85rem', fontWeight:'bold', lineHeight:1.2}}>{p}</div>
+                                            <div style={{fontSize:'0.8rem', color:'var(--primary)'}}>{data?.prices[p] || 0}$</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="ticket">
+                        <h2 style={{textAlign:'center', borderBottom:'1px dashed #444', paddingBottom:15, marginBottom:15}}>TICKET</h2>
+                        <input className="inp" placeholder="Nom Client" value={invoiceForm.client} onChange={e => setInvoiceForm({...invoiceForm, client: e.target.value})} />
+                        
+                        <div style={{flex:1, overflowY:'auto', marginBottom: 15}}>
+                            {cart.length === 0 ? <div style={{textAlign:'center', color:'#555', marginTop: 50}}>Panier vide</div> : 
+                            cart.map((item, idx) => (
+                                <div key={idx} style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 10, background:'rgba(255,255,255,0.05)', padding:8, borderRadius:6}}>
+                                    <div>
+                                        <div style={{fontSize:'0.9rem'}}>{item.name}</div>
+                                        <div style={{fontSize:'0.8rem', color:'#888'}}>{item.price}$ x {item.qty}</div>
+                                    </div>
+                                    <button className="btn-red" onClick={() => removeFromCart(idx)}>×</button>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div style={{borderTop:'1px dashed #444', paddingTop: 15}}>
+                            <div style={{display:'flex', justifyContent:'space-between', marginBottom: 10}}>
+                                <select className="inp" style={{width:'60%', marginBottom:0}} value={invoiceForm.discount} onChange={e => setInvoiceForm({...invoiceForm, discount: Number(e.target.value)})}>
+                                    <option value="0">Remise (0%)</option>
+                                    <option value="10">VIP (-10%)</option>
+                                    <option value="30">Partenaire (-30%)</option>
+                                    <option value="50">Moitié Prix (-50%)</option>
+                                    <option value="100">Gratuit (100%)</option>
+                                </select>
+                                <div style={{textAlign:'right'}}>
+                                    <div style={{fontSize:'0.8rem', color:'#888'}}>Total</div>
+                                    <div style={{fontSize:'1.5rem', fontWeight:'bold', color:'var(--primary)'}}>{calculateTotal().total}$</div>
+                                </div>
+                            </div>
+                            <button className="btn-p" disabled={sending || cart.length === 0} 
+                                onClick={() => {
+                                    const totals = calculateTotal();
+                                    sendAction('sendFacture', {
+                                        employee: user,
+                                        client: invoiceForm.client,
+                                        items: cart,
+                                        invoiceNumber: invoiceForm.invoiceNumber,
+                                        total: totals.sub,
+                                        discountPct: invoiceForm.discount,
+                                        discountAmount: totals.discAmt,
+                                        finalTotal: totals.total
+                                    });
+                                }}
+                            >
+                                {sending ? 'ENVOI...' : 'ENCAISSER 💳'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* EXPENSES */}
+            {currentTab === 'expenses' && (
+                <div style={{maxWidth: 500, margin: '0 auto'}}>
+                    <h2 style={{textAlign:'center', marginBottom: 20}}>Déclaration de Dépenses</h2>
+                    <div className="card">
+                        <input className="inp" placeholder="Montant ($)" type="number" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} />
+                        <textarea className="inp" placeholder="Justification..." value={expenseForm.reason} onChange={e => setExpenseForm({...expenseForm, reason: e.target.value})} rows="4"></textarea>
+                        <div style={{marginBottom: 20, textAlign:'center', border:'1px dashed #555', padding: 20, borderRadius: 10}}>
+                            <p style={{marginBottom: 10}}>Preuve (Photo)</p>
+                            <input type="file" accept="image/*" onChange={handleExpenseFile} />
+                            {expenseForm.file && <img src={expenseForm.file} style={{maxWidth:'100%', marginTop: 10, borderRadius:8}} />}
+                        </div>
+                        <button className="btn-p" onClick={() => sendAction('sendExpense', expenseForm)}>ENVOYER LA NOTE</button>
+                    </div>
+                </div>
+            )}
+
+            {/* ADMIN / RH */}
+            {currentTab === 'admin' && (
+                <div style={{maxWidth: 600, margin: '0 auto'}}>
+                    <h2 style={{textAlign:'center', marginBottom: 20}}>Administration & RH</h2>
+                    
+                    {!isAdminUnlocked ? (
+                        <div className="card" style={{textAlign:'center'}}>
+                            <h3>Accès Restreint</h3>
+                            <p style={{marginBottom: 20, color:'#888'}}>Entrez le code PIN Direction</p>
+                            <input className="inp" type="password" style={{textAlign:'center', fontSize:'1.5rem', letterSpacing: 5}} maxLength="6" value={adminPin} onChange={e => setAdminPin(e.target.value)} />
+                            <button className="btn-p" onClick={() => { if(adminPin === '123459') setIsAdminUnlocked(true); else alert('Code faux'); }}>VERROUILLER</button>
+                        </div>
+                    ) : (
+                        <div className="card">
+                            <h3 style={{color: 'var(--primary)', marginBottom: 15}}>Nouvelle Action RH</h3>
+                            <select className="inp" value={hrForm.type} onChange={e => setHrForm({...hrForm, type: e.target.value})}>
+                                {HR_TYPES.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                            </select>
+                            <input className="inp" placeholder="Employé / Cible concernée" value={hrForm.target} onChange={e => setHrForm({...hrForm, target: e.target.value})} />
+                            <textarea className="inp" rows="5" placeholder="Détails du dossier, raison..." value={hrForm.reason} onChange={e => setHrForm({...hrForm, reason: e.target.value})}></textarea>
+                            <button className="btn-p" onClick={() => sendAction('sendHR', hrForm)}>TRANSMETTRE LE DOSSIER</button>
+                            <button className="btn-red" style={{width:'100%', marginTop: 10}} onClick={() => setIsAdminUnlocked(false)}>VERROUILLER</button>
+                        </div>
+                    )}
+                </div>
+            )}
+            
+            {/* ANNUAIRE */}
+            {currentTab === 'annuaire' && (
+                <div className="grid">
+                    {data?.employees?.map(emp => (
+                        <div key={emp} className="card" style={{textAlign:'center'}}>
+                            <div style={{width: 60, height: 60, background:'#333', borderRadius:'50%', margin:'0 auto 10px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1.5rem', border:'2px solid var(--primary)'}}>
+                                {emp.charAt(0)}
+                            </div>
+                            <h3>{emp}</h3>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
-      )}
-    </>
+    </div>
   );
 }
