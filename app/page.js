@@ -1,23 +1,20 @@
 'use client';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 
-// --- CONFIGURATION DATA ---
+// --- DONNÉES & CONFIG ---
 const WEBHOOKS = {
-  factures: "VOTRE_WEBHOOK_FACTURES",
-  direction: "VOTRE_WEBHOOK_DIRECTION",
-  recrutement: "VOTRE_WEBHOOK_RECRUTEMENT",
-  convocation: "VOTRE_WEBHOOK_CONVOCATION",
-  avertissement: "VOTRE_WEBHOOK_AVERTISSEMENT",
-  licenciement: "VOTRE_WEBHOOK_LICENCIEMENT", 
+  // Remplace par tes vrais liens Discord si tu n'utilises pas le route.js
+  factures: "TON_WEBHOOK_FACTURES", 
+  direction: "TON_WEBHOOK_DIRECTION", 
+  recrutement: "TON_WEBHOOK_RECRUTEMENT",
   depense: "https://discord.com/api/webhooks/1458467290151653563/SGEnsRQJ2KDDnhUoCRmGp0IRM96o65gP-HVhWrxTzrDef02aS3SwtQKM2WG6iVKE43fs"
 };
 
-const EMPLOYEES_LIST = [
-  "Alvarez Julio", "Bloom Soren", "Price Sun", "Hernandez Andres", 
-  "Mason Bloom", "Jimenez Taziñio", "Rosales Kali", "Daikii Isuke", 
-  "Makara Chariya Chan", "Price Moon", "Jayden Lockett", "Jayden Coleman", 
-  "Moon Veda", "Inaya Kinslow", "Elijah Gonzalez", "Kilyan Smith", 
-  "Obito Valeria", "Lily Summer"
+const EMPLOYEES = [
+  "Alvarez Julio", "Bloom Soren", "Price Sun", "Hernandez Andres", "Mason Bloom", 
+  "Jimenez Taziñio", "Rosales Kali", "Daikii Isuke", "Makara Chariya Chan", 
+  "Price Moon", "Jayden Lockett", "Jayden Coleman", "Moon Veda", "Inaya Kinslow", 
+  "Elijah Gonzalez", "Kilyan Smith", "Obito Valeria", "Lily Summer"
 ];
 
 const PRODUCTS = [
@@ -27,267 +24,233 @@ const PRODUCTS = [
   { id: 'Jambes', icon: 'ri-walk-fill', color: '#10b981', items: [{n:'Petit Tatouage', p:450}, {n:'Moyen Tatouage', p:600}, {n:'Grand Tatouage', p:800}, {n:'Jambe Complète', p:2500}] },
   { id: 'Custom', icon: 'ri-edit-2-fill', color: '#94a3b8', items: [{n:'Retouche', p:100}, {n:'Custom Small', p:500}, {n:'Custom Large', p:1500}, {n:'Projet Spécial', p:5000}] },
   { id: 'Laser', icon: 'ri-flashlight-fill', color: '#ef4444', items: [{n:'Petit Laser', p:250}, {n:'Moyen Laser', p:500}, {n:'Grand Laser', p:750}, {n:'Séance Complète', p:1000}] },
-  { id: 'Coiffeur', icon: 'ri-scissors-fill', color: '#ec4899', items: [{n:'Coupe', p:200}, {n:'Couleur', p:100}, {n:'Barbe', p:100}, {n:'Dégradé', p:100}] }
+  { id: 'Coiffure', icon: 'ri-scissors-fill', color: '#ec4899', items: [{n:'Coupe', p:200}, {n:'Couleur', p:100}, {n:'Barbe', p:100}, {n:'Dégradé', p:100}] }
 ];
 
 const PARTNERS = [
-  {name:'HenHouse', val:30, img:'https://i.goopics.net/xvvwd2.png', phone:'555-0192'},
-  {name:'Auto Exotic', val:30, img:'https://i.goopics.net/jqrtnn.png', phone:'555-1029'},
-  {name:'LifeInvader', val:30, img:'https://i.goopics.net/k7g19i.png', phone:'555-3920'},
-  {name:'Delight', val:30, img:'https://i.goopics.net/1yiiit.png', phone:'555-8821'},
-  {name:'LTD Sandy', val:30, img:'https://i.goopics.net/4x8au4.png', phone:'555-6672'},
-  {name:'Biogood', val:30, img:'https://i.goopics.net/3y6ljf.png', phone:'397-3784'},
-];
-
-const DEFAULT_DIRECTORY = [
-  { nom: "Bloom", prenom: "Soren", grade: "Co-Patron", tel: "575-5535", photo: "https://i.goopics.net/o6gnq3.png" }
+  {name:'HenHouse', val:30}, {name:'Auto Exotic', val:30}, {name:'LifeInvader', val:30},
+  {name:'Delight', val:30}, {name:'LTD Sandy', val:30}, {name:'Biogood', val:30}
 ];
 
 export default function Home() {
-  const [view, setView] = useState('login'); // login, dashboard, invoice, direction, annuaire
+  const [view, setView] = useState('login'); 
   const [user, setUser] = useState('');
   const [clock, setClock] = useState('00:00');
   
-  // States Caisse
+  // CAISSE
   const [cart, setCart] = useState([]);
-  const [openCat, setOpenCat] = useState(null); // Index de la catégorie ouverte
-  const [searchQuery, setSearchQuery] = useState('');
-  const [invoiceDetails, setInvoiceDetails] = useState({ client: '', discount: 0, id: '' });
+  const [invoice, setInvoice] = useState({ client: '', discount: 0, id: '' });
+  const [search, setSearch] = useState('');
+  const [activeCat, setActiveCat] = useState(null);
 
-  // States Admin
+  // ADMIN
   const [adminPin, setAdminPin] = useState('');
-  const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
-  const [modalHR, setModalHR] = useState({ show: false, type: '' });
-  const [hrForm, setHrForm] = useState({ target: '', date: '', reason: '' });
+  const [unlocked, setUnlocked] = useState(false);
+  const [hrModal, setHrModal] = useState(null); // 'recrutement', etc.
+  const [hrData, setHrData] = useState({ target: '', reason: '', date: '' });
 
-  // States Annuaire
-  const [contacts, setContacts] = useState([]);
-  const [modalAddContact, setModalAddContact] = useState(false);
-  const [newContact, setNewContact] = useState({ nom: '', prenom: '', grade: 'Employé', tel: '', photo: '' });
-  const [modalContact, setModalContact] = useState(null); // Contact objet ou null
+  // ANNUAIRE
+  const [contacts, setContacts] = useState([{ nom: "Bloom", prenom: "Soren", grade: "Co-Patron", tel: "575-5535" }]);
+  const [contactModal, setContactModal] = useState(false);
+  const [newContact, setNewContact] = useState({ nom:'', prenom:'', tel:'', grade:'Employé' });
 
-  // Init
   useEffect(() => {
-    // Clock
-    const timer = setInterval(() => setClock(new Date().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})), 1000);
-    // Invoice ID
-    setInvoiceDetails(prev => ({ ...prev, id: 'INV-' + Math.floor(Math.random() * 1000000) }));
-    // Load contacts
-    const savedContacts = localStorage.getItem('vespucci_contacts');
-    if (savedContacts) setContacts(JSON.parse(savedContacts));
-    else setContacts(DEFAULT_DIRECTORY);
-
-    return () => clearInterval(timer);
+    setInterval(() => setClock(new Date().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})), 1000);
+    setInvoice(p => ({...p, id: 'INV-'+Math.floor(Math.random()*1000000)}));
+    
+    // Charger contacts sauvegardés
+    const saved = localStorage.getItem('vespucci_contacts');
+    if(saved) setContacts(JSON.parse(saved));
   }, []);
 
-  // --- LOGIC CAISSE ---
-  const toggleCat = (idx) => setOpenCat(openCat === idx ? null : idx);
+  // --- FONCTIONS ---
+  const playSound = (type) => {
+    // Petit son d'interface (Optionnel)
+    try {
+        const audio = new Audio(type === 'click' ? 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3' : '');
+        audio.volume = 0.2; audio.play().catch(e=>{});
+    } catch(e){}
+  };
 
   const addToCart = (item) => {
+    playSound('click');
     setCart(prev => {
-      const exist = prev.find(x => x.n === item.n);
-      if(exist) return prev.map(x => x.n === item.n ? {...x, q: x.q + 1} : x);
-      return [...prev, {...item, q: 1}];
+        const exist = prev.find(i => i.n === item.n);
+        if(exist) return prev.map(i => i.n === item.n ? {...i, q: i.q+1} : i);
+        return [...prev, {...item, q:1}];
     });
   };
 
-  const modQty = (idx, amount) => {
-    setCart(prev => {
-      const newCart = [...prev];
-      newCart[idx].q += amount;
-      if(newCart[idx].q <= 0) newCart.splice(idx, 1);
-      return newCart;
-    });
-  };
-
-  const calculateTotal = () => {
-    const sub = cart.reduce((a, b) => a + (b.p * b.q), 0);
-    const discAmt = sub * (invoiceDetails.discount / 100);
+  const calcTotal = () => {
+    const sub = cart.reduce((a,b) => a + (b.p * b.q), 0);
+    const discAmt = sub * (invoice.discount / 100);
     return { sub, discAmt, total: sub - discAmt };
   };
 
-  const submitInvoice = async () => {
-    if(cart.length === 0) return alert("Panier vide");
-    const totals = calculateTotal();
+  // --- API HANDLERS (Via route.js ou direct) ---
+  const sendToDiscord = async (type, payload) => {
+    // On passe par notre route API locale pour cacher les webhooks (Sécurité)
+    // Si tu veux utiliser les liens directs, remplace '/api/proxy' par WEBHOOKS[type]
     
+    const res = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ webhookUrl: WEBHOOKS[type] || WEBHOOKS.direction, embed: payload })
+    });
+    
+    if(res.ok) alert("✅ Données transmises au serveur sécurisé.");
+    else alert("❌ Erreur de transmission.");
+  };
+
+  const submitInvoice = () => {
+    if(cart.length === 0) return;
+    const { total } = calcTotal();
     const embed = {
-      title: "🧾 Facture Validée",
-      color: 3447003,
-      footer: { text: "Vespucci • Titanium Edition" },
-      timestamp: new Date(),
-      fields: [
-        {name:"Vendeur", value: user, inline:true},
-        {name:"Client", value: invoiceDetails.client || "Inconnu", inline:true},
-        {name:"Total Payé", value: `**${totals.total.toFixed(0)} $**`, inline:true},
-        {name:"Détails", value: cart.map(i=>`• ${i.n} (x${i.q})`).join('\n')}
-      ]
-    };
-
-    await fetch(WEBHOOKS.factures, {
-      method: "POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({embeds:[embed]})
-    });
-
-    setCart([]);
-    setInvoiceDetails(prev => ({ ...prev, client: '', id: 'INV-' + Math.floor(Math.random() * 1000000) }));
-    alert("Facture envoyée !");
-  };
-
-  // --- LOGIC RH ---
-  const sendHR = async (e) => {
-    e.preventDefault();
-    const type = modalHR.type;
-    const embed = { 
-        title: "Action RH: "+type.toUpperCase(), 
-        color: type === 'licenciement' ? 15548997 : 3447003,
+        title: "💎 Facture Validée",
+        color: 3447003,
         fields: [
-        {name:"Auteur", value: user, inline:true},
-        {name:"Cible/Montant", value: hrForm.target, inline:true},
-        {name:"Date Effet", value: hrForm.date, inline:true},
-        {name:"Détails", value: hrForm.reason}
-    ]};
-    
-    await fetch(WEBHOOKS[type] || WEBHOOKS.direction, {
-        method: "POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({embeds:[embed]})
-    });
-    setModalHR({ show: false, type: '' });
-    setHrForm({ target: '', date: '', reason: '' });
-    alert("Dossier transmis");
+            {name: "Vendeur", value: user, inline: true},
+            {name: "Client", value: invoice.client || "Inconnu", inline: true},
+            {name: "Montant", value: `**${total.toFixed(0)} $**`, inline: true},
+            {name: "Articles", value: cart.map(i => `${i.n} x${i.q}`).join('\n')}
+        ],
+        footer: { text: "Vespucci Titanium • System" }
+    };
+    sendToDiscord('factures', embed);
+    setCart([]);
+    setInvoice(p => ({...p, client:'', id: 'INV-'+Math.floor(Math.random()*1000000)}));
   };
 
-  // --- LOGIC CONTACTS ---
-  const saveContact = (e) => {
+  const submitHR = (e) => {
     e.preventDefault();
-    const newList = [...contacts, newContact];
-    setContacts(newList);
-    localStorage.setItem('vespucci_contacts', JSON.stringify(newList));
-    setModalAddContact(false);
-    setNewContact({ nom: '', prenom: '', grade: 'Employé', tel: '', photo: '' });
+    const embed = {
+        title: `Dossier RH: ${hrModal.toUpperCase()}`,
+        color: hrModal === 'licenciement' ? 15548997 : 3447003,
+        fields: [
+            {name: "Auteur", value: user, inline: true},
+            {name: "Cible", value: hrData.target, inline: true},
+            {name: "Raison", value: hrData.reason},
+            {name: "Date", value: hrData.date}
+        ]
+    };
+    sendToDiscord(hrModal, embed);
+    setHrModal(null);
   };
 
-  // --- RENDER ---
-  if (view === 'login') return (
+  const saveContact = () => {
+      const list = [...contacts, newContact];
+      setContacts(list);
+      localStorage.setItem('vespucci_contacts', JSON.stringify(list));
+      setContactModal(false);
+  };
+
+  // --- VUE LOGIN ---
+  if(view === 'login') return (
     <div className="login-gate">
-      <div className="card" style={{width: 400, textAlign: 'center', borderColor: 'rgba(6,182,212,0.3)', boxShadow:'0 0 60px -20px var(--primary-glow)'}}>
-        <div style={{fontSize:'3rem', marginBottom:20, color:'white', filter:'drop-shadow(0 0 15px var(--primary-glow))'}}>
-            <i className="ri-vip-diamond-fill"></i>
+        <div className="card" style={{width: 400, textAlign:'center'}}>
+            <i className="ri-vip-diamond-fill" style={{fontSize:'3rem', color:'var(--primary)', filter:'drop-shadow(0 0 15px var(--primary))'}}></i>
+            <h1 style={{fontSize:'2rem', fontWeight:800, marginTop:10}}>VESPUCCI</h1>
+            <p style={{color:'var(--text-muted)', letterSpacing:3, fontSize:'0.8rem', marginBottom:30}}>TITANIUM EDITION</p>
+            
+            <div style={{textAlign:'left', marginBottom:20}}>
+                <label style={{fontSize:'0.75rem', fontWeight:700, color:'var(--primary)', textTransform:'uppercase'}}>Identifiant</label>
+                <select className="input" onChange={e => setUser(e.target.value)}>
+                    <option value="">Choisir identité...</option>
+                    {EMPLOYEES.sort().map(e => <option key={e} value={e}>{e}</option>)}
+                </select>
+            </div>
+            <button className="btn btn-primary" style={{width:'100%'}} disabled={!user} onClick={() => setView('dashboard')}>CONNEXION CRYPTÉE</button>
         </div>
-        <h1 style={{fontSize:'1.8rem', fontWeight:800, marginBottom:5}}>Vespucci</h1>
-        <p style={{color:'var(--text-muted)', fontSize:'0.75rem', letterSpacing:3, textTransform:'uppercase', marginBottom:30}}>Titanium Access</p>
-        
-        <div style={{textAlign:'left', marginBottom:20}}>
-            <label style={{fontSize:'0.7rem', color:'var(--primary)', fontWeight:700, display:'block', marginBottom:8, textTransform:'uppercase'}}>Identifiant</label>
-            <select className="input" onChange={(e) => setUser(e.target.value)} value={user}>
-                <option value="">Choisir une identité...</option>
-                {EMPLOYEES_LIST.sort().map(e => <option key={e} value={e}>{e}</option>)}
-            </select>
-        </div>
-        <button className="btn btn-primary" style={{width:'100%'}} disabled={!user} onClick={() => setView('dashboard')}>
-            INITIALISER LA SESSION
-        </button>
-      </div>
     </div>
   );
 
+  // --- VUE PRINCIPALE ---
   return (
-    <div className="app-container anim-enter" style={{maxWidth: 1600, margin: '0 auto', padding: 20}}>
-      
-      {/* TOPBAR */}
-      <header className="flex-sb" style={{padding:'15px 30px', marginBottom:40, background:'rgba(20,20,35,0.6)', backdropFilter:'blur(20px)', border:'1px solid var(--glass-border)', borderRadius:18, position:'sticky', top:20, zIndex:100}}>
-        <div className="flex-c" style={{gap:15, cursor:'pointer'}} onClick={() => setView('dashboard')}>
-            <div style={{width:40, height:40, background:'var(--gradient-primary)', borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', color:'white', boxShadow:'0 0 20px var(--primary-glow)'}}>
-                <i className="ri-vip-diamond-fill"></i>
-            </div>
-            <div style={{lineHeight:1.2}}>
-                <div style={{fontWeight:800, fontSize:'1.1rem'}}>VESPUCCI</div>
-                <div style={{fontSize:'0.7rem', color:'var(--text-muted)', letterSpacing:2, textTransform:'uppercase'}}>Manager v5.2</div>
-            </div>
-        </div>
-        <div className="flex-c" style={{gap:20}}>
-            {view !== 'dashboard' && <button className="btn btn-ghost" onClick={() => setView('dashboard')}><i className="ri-layout-grid-fill"></i> Dashboard</button>}
-            <div style={{textAlign:'right'}}>
-                <div style={{fontWeight:700, fontSize:'0.9rem'}}>{user}</div>
-                <div style={{fontSize:'0.7rem', color:'var(--primary)', fontWeight:800, letterSpacing:1}}>Employé</div>
-            </div>
-            <button className="btn btn-ghost btn-icon" style={{color:'var(--danger)', borderColor:'rgba(239,68,68,0.3)'}} onClick={() => setView('login')}><i className="ri-shut-down-line"></i></button>
-        </div>
-      </header>
-
-      {/* VIEW: DASHBOARD */}
-      {view === 'dashboard' && (
-        <section className="anim-enter">
-            <div className="flex-sb" style={{marginBottom:30, alignItems:'flex-end'}}>
+    <div style={{maxWidth:1600, margin:'0 auto', padding:20}}>
+        {/* TOP BAR */}
+        <header className="flex-sb card" style={{padding:'15px 30px', marginBottom:30, position:'sticky', top:20, zIndex:50}}>
+            <div className="flex-c" style={{gap:15, cursor:'pointer'}} onClick={() => setView('dashboard')}>
+                <div style={{width:40, height:40, background:'linear-gradient(135deg, var(--primary), #3b82f6)', borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', color:'white', boxShadow:'0 0 15px var(--primary-dim)'}}>
+                    <i className="ri-vip-diamond-fill"></i>
+                </div>
                 <div>
-                    <h2 style={{fontSize:'2.2rem', fontWeight:800}}>Aperçu Global</h2>
-                    <p style={{color:'var(--text-muted)'}}>Terminal de gestion connecté.</p>
-                </div>
-                <div style={{fontFamily:'var(--font-data)', background:'rgba(255,255,255,0.03)', padding:'8px 16px', borderRadius:8, border:'1px solid var(--glass-border)'}}>
-                    <i className="ri-time-line" style={{color:'var(--primary)', marginRight:8}}></i>{clock}
+                    <div style={{fontWeight:800, fontSize:'1.1rem'}}>VESPUCCI</div>
+                    <div style={{fontSize:'0.7rem', color:'var(--text-muted)', letterSpacing:1}}>MANAGER V5.0</div>
                 </div>
             </div>
+            
+            <div className="flex-c" style={{gap:20}}>
+                {view !== 'dashboard' && <button className="btn btn-ghost" onClick={() => setView('dashboard')}>DASHBOARD</button>}
+                <div style={{textAlign:'right'}}>
+                    <div style={{fontWeight:700}}>{user}</div>
+                    <div style={{fontSize:'0.7rem', color:'var(--primary)', fontWeight:700}}>EN LIGNE</div>
+                </div>
+                <button className="btn btn-ghost" onClick={() => setView('login')}><i className="ri-shut-down-line" style={{color:'var(--danger)'}}></i></button>
+            </div>
+        </header>
 
-            <div className="bento-grid">
-                <div className="widget w-large" onClick={() => setView('invoice')}>
-                    <i className="ri-shopping-bag-3-fill" style={{position:'absolute', right:-20, bottom:-20, fontSize:'8rem', opacity:0.05, transform:'rotate(-15deg)'}}></i>
-                    <div>
-                        <span className="cc-role-badge" style={{background:'rgba(255,255,255,0.1)', color:'white'}}>Module Vente</span>
-                        <h3 style={{fontSize:'2.5rem', fontWeight:700, marginTop:15, fontFamily:'var(--font-data)'}}>CAISSE</h3>
-                        <p style={{color:'rgba(255,255,255,0.6)', fontSize:'0.9rem'}}>Accès au catalogue produits et facturation.</p>
+        {/* DASHBOARD */}
+        {view === 'dashboard' && (
+            <div className="anim-enter">
+                <div className="flex-sb" style={{marginBottom:30}}>
+                    <h2 style={{fontSize:'2rem', fontWeight:800}}>Vue d'ensemble</h2>
+                    <div className="btn-ghost" style={{fontFamily:'var(--font-data)', padding:'8px 15px', borderRadius:8}}>{clock}</div>
+                </div>
+
+                <div className="bento-grid">
+                    <div className="widget w-large" onClick={() => setView('caisse')}>
+                        <i className="ri-shopping-cart-2-fill" style={{position:'absolute', right:-20, bottom:-20, fontSize:'8rem', opacity:0.05, transform:'rotate(-10deg)'}}></i>
+                        <div>
+                            <span className="cc-role-badge" style={{background:'rgba(255,255,255,0.1)', padding:'4px 8px', borderRadius:5, fontSize:'0.7rem'}}>MODULE VENTE</span>
+                            <h3 className="w-stat" style={{marginTop:15}}>CAISSE</h3>
+                            <p style={{color:'var(--text-muted)', fontSize:'0.9rem'}}>Catalogue produits & Facturation</p>
+                        </div>
+                        <button className="btn btn-primary" style={{width:'fit-content', marginTop:20}}>OUVRIR <i className="ri-arrow-right-line"></i></button>
                     </div>
-                    <button className="btn btn-primary" style={{width:'fit-content', marginTop:20}}>Ouvrir <i className="ri-arrow-right-line"></i></button>
-                </div>
 
-                <div className="widget" style={{gridColumn:'span 1'}} onClick={() => setView('direction')}>
-                    <i className="ri-shield-star-fill" style={{position:'absolute', right:-20, bottom:-20, fontSize:'6rem', opacity:0.05, color:'var(--accent)'}}></i>
-                    <div style={{color:'var(--accent)', fontWeight:700, fontSize:'0.8rem'}}>ADMINISTRATION</div>
-                    <div style={{fontSize:'2.5rem', fontWeight:700, fontFamily:'var(--font-data)'}}>RH</div>
-                    <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Dossiers & Finances</div>
-                </div>
+                    <div className="widget" onClick={() => setView('admin')}>
+                        <i className="ri-shield-star-fill" style={{position:'absolute', right:-20, bottom:-20, fontSize:'6rem', opacity:0.05, color:'var(--accent)'}}></i>
+                        <div style={{color:'var(--accent)', fontWeight:700, fontSize:'0.8rem'}}>ADMIN</div>
+                        <div className="w-stat">RH</div>
+                        <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Gestion Personnel</div>
+                    </div>
 
-                <div className="widget" style={{gridColumn:'span 1'}} onClick={() => setView('annuaire')}>
-                    <i className="ri-contacts-book-2-fill" style={{position:'absolute', right:-20, bottom:-20, fontSize:'6rem', opacity:0.05, color:'var(--success)'}}></i>
-                    <div style={{color:'var(--success)', fontWeight:700, fontSize:'0.8rem'}}>CONTACTS</div>
-                    <div style={{fontSize:'2.5rem', fontWeight:700, fontFamily:'var(--font-data)'}}>TEL</div>
-                    <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Annuaire Entreprise</div>
+                    <div className="widget" onClick={() => setView('annuaire')}>
+                        <i className="ri-contacts-book-2-fill" style={{position:'absolute', right:-20, bottom:-20, fontSize:'6rem', opacity:0.05, color:'var(--success)'}}></i>
+                        <div style={{color:'var(--success)', fontWeight:700, fontSize:'0.8rem'}}>BOTIN</div>
+                        <div className="w-stat">TEL</div>
+                        <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Annuaire Entreprise</div>
+                    </div>
                 </div>
             </div>
-        </section>
-      )}
+        )}
 
-      {/* VIEW: INVOICE (CAISSE) */}
-      {view === 'invoice' && (
-        <section className="anim-enter">
-            <div className="pos-layout">
-                {/* Catalogue */}
-                <div style={{display:'flex', flexDirection:'column', gap:20, overflow:'hidden', height:'100%'}}>
+        {/* CAISSE */}
+        {view === 'caisse' && (
+            <div className="pos-layout anim-enter">
+                <div style={{display:'flex', flexDirection:'column', gap:20, height:'100%'}}>
                     <div style={{position:'relative'}}>
-                        <i className="ri-search-2-line" style={{position:'absolute', left:18, top:18, color:'var(--text-muted)'}}></i>
-                        <input className="input" placeholder="Rechercher..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{paddingLeft:50}} />
+                        <i className="ri-search-line" style={{position:'absolute', left:15, top:15, color:'var(--text-muted)'}}></i>
+                        <input className="input" placeholder="Rechercher un service..." style={{paddingLeft:45}} value={search} onChange={e => setSearch(e.target.value)} />
                     </div>
                     
-                    <div style={{overflowY:'auto', flex:1, paddingRight:8}}>
+                    <div style={{overflowY:'auto', paddingRight:10}}>
                         {PRODUCTS.map((cat, idx) => (
-                            <div key={idx} className="pos-accordion-item" style={{display: searchQuery && !cat.items.some(i => i.n.toLowerCase().includes(searchQuery.toLowerCase())) ? 'none' : 'block'}}>
-                                <div 
-                                    className={`pos-acc-header ${openCat === idx || searchQuery ? 'active' : ''}`} 
-                                    onClick={() => toggleCat(idx)}
-                                >
-                                    <div className="flex-c" style={{gap:15, fontWeight:600, fontSize:'0.9rem'}}>
-                                        <div style={{width:32, height:32, borderRadius:8, background:`${cat.color}20`, color:cat.color, display:'flex', alignItems:'center', justifyContent:'center'}}>
-                                            <i className={cat.icon}></i>
-                                        </div>
-                                        {cat.id}
+                            <div key={idx} style={{marginBottom:15}}>
+                                <div onClick={() => setActiveCat(activeCat === idx ? null : idx)} 
+                                     style={{display:'flex', justifyContent:'space-between', padding:15, background:'rgba(255,255,255,0.03)', borderRadius:12, cursor:'pointer', border:'1px solid var(--glass-border)', marginBottom:5}}>
+                                    <div className="flex-c" style={{gap:10, fontWeight:600}}>
+                                        <i className={cat.icon} style={{color:cat.color}}></i> {cat.id}
                                     </div>
-                                    <i className={`ri-arrow-down-s-line ${openCat === idx ? 'ri-arrow-up-s-line' : ''}`}></i>
+                                    <i className={`ri-arrow-${activeCat === idx ? 'up' : 'down'}-s-line`}></i>
                                 </div>
                                 
-                                {(openCat === idx || searchQuery) && (
-                                    <div className="product-grid-inner">
-                                        {cat.items.filter(i => i.n.toLowerCase().includes(searchQuery.toLowerCase())).map((item, iIdx) => (
-                                            <div key={iIdx} className="product-card" onClick={() => addToCart(item)}>
-                                                <div style={{fontSize:'0.8rem', fontWeight:500, lineHeight:1.2, marginBottom:5}}>{item.n}</div>
-                                                <div style={{fontFamily:'var(--font-data)', fontSize:'0.85rem', color:'var(--primary)', fontWeight:700, background:'rgba(0,0,0,0.3)', padding:'2px 8px', borderRadius:6}}>{item.p}$</div>
+                                {(activeCat === idx || search) && (
+                                    <div className="grid-3" style={{gridTemplateColumns:'repeat(auto-fill, minmax(130px, 1fr))', gap:10, padding:10, background:'rgba(0,0,0,0.2)', borderRadius:12}}>
+                                        {cat.items.filter(i => i.n.toLowerCase().includes(search.toLowerCase())).map((item, i) => (
+                                            <div key={i} className="product-card" onClick={() => addToCart(item)}>
+                                                <div style={{fontSize:'0.85rem', fontWeight:600, marginBottom:5}}>{item.n}</div>
+                                                <div style={{fontFamily:'var(--font-data)', color:'var(--primary)', fontWeight:700}}>{item.p}$</div>
                                             </div>
                                         ))}
                                     </div>
@@ -297,171 +260,141 @@ export default function Home() {
                     </div>
                 </div>
 
-                {/* Ticket */}
-                <div className="ticket-panel">
-                    <div style={{padding:20, borderBottom:'1px dashed var(--glass-border)', background:'rgba(255,255,255,0.02)'}}>
+                <div className="card" style={{display:'flex', flexDirection:'column', height:'100%', padding:0, overflow:'hidden'}}>
+                    <div style={{padding:20, borderBottom:'1px solid var(--glass-border)', background:'rgba(255,255,255,0.02)'}}>
                         <div className="flex-sb" style={{marginBottom:15}}>
-                            <span style={{fontWeight:700, fontSize:'0.9rem'}}><i className="ri-file-list-3-fill"></i> TICKET</span>
-                            <span style={{background:'var(--primary)', color:'white', fontWeight:700, fontSize:'0.75rem', padding:'3px 8px', borderRadius:6}}>{cart.reduce((a,b)=>a+b.q,0)}</span>
+                            <span style={{fontWeight:700}}><i className="ri-file-list-3-line"></i> TICKET</span>
+                            <span style={{background:'var(--primary)', padding:'2px 8px', borderRadius:5, fontSize:'0.75rem', fontWeight:700}}>{cart.length}</span>
                         </div>
                         <div className="grid-2" style={{gap:10}}>
-                            <input className="input" placeholder="Client" value={invoiceDetails.client} onChange={e => setInvoiceDetails({...invoiceDetails, client: e.target.value})} style={{fontSize:'0.85rem'}} />
-                            <input className="input" value={invoiceDetails.id} readOnly style={{opacity:0.6, fontFamily:'var(--font-data)', textAlign:'center'}} />
+                            <input className="input" placeholder="Client" value={invoice.client} onChange={e => setInvoice({...invoice, client:e.target.value})} />
+                            <input className="input" value={invoice.id} readOnly style={{opacity:0.5, textAlign:'center', fontFamily:'var(--font-data)'}} />
                         </div>
                     </div>
 
-                    <div style={{flex:1, overflowY:'auto', padding:15}}>
-                        {cart.length === 0 ? (
-                             <div style={{display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', color:'var(--text-muted)', opacity:0.2}}>
-                                <i className="ri-shopping-cart-line" style={{fontSize:'3rem', marginBottom:10}}></i>
-                                <span style={{fontSize:'0.8rem'}}>Vide</span>
-                             </div>
-                        ) : (
-                            cart.map((item, idx) => (
-                                <div key={idx} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'12px 15px', marginBottom:8, borderRadius:10, background:'rgba(255,255,255,0.03)', borderLeft:'2px solid var(--glass-border)'}}>
-                                    <div>
-                                        <div style={{fontWeight:600, fontSize:'0.9rem'}}>{item.n}</div>
-                                        <div style={{fontSize:'0.75rem', color:'var(--text-muted)', fontFamily:'var(--font-data)'}}>{item.p}$ x {item.q}</div>
-                                    </div>
-                                    <div className="flex-c" style={{gap:5}}>
-                                        <button className="btn btn-ghost btn-icon" style={{width:24, height:24}} onClick={() => modQty(idx, -1)}>-</button>
-                                        <button className="btn btn-ghost btn-icon" style={{width:24, height:24, color:'var(--success)'}} onClick={() => modQty(idx, 1)}>+</button>
-                                    </div>
+                    <div style={{flex:1, overflowY:'auto', padding:20}}>
+                        {cart.length === 0 ? <div style={{textAlign:'center', color:'var(--text-muted)', marginTop:50}}>Panier vide...</div> : 
+                         cart.map((item, idx) => (
+                            <div key={idx} className="flex-sb" style={{marginBottom:10, padding:10, background:'rgba(255,255,255,0.03)', borderRadius:8}}>
+                                <div>
+                                    <div style={{fontSize:'0.9rem', fontWeight:600}}>{item.n}</div>
+                                    <div style={{fontSize:'0.75rem', color:'var(--text-muted)', fontFamily:'var(--font-data)'}}>{item.p}$ x {item.q}</div>
                                 </div>
-                            ))
-                        )}
+                                <i className="ri-delete-bin-line" style={{color:'var(--danger)', cursor:'pointer'}} onClick={() => {
+                                    const n = [...cart]; n.splice(idx,1); setCart(n);
+                                }}></i>
+                            </div>
+                        ))}
                     </div>
 
-                    <div style={{background:'rgba(15,15,22,0.95)', borderTop:'1px solid var(--glass-border)', padding:25, backdropFilter:'blur(10px)'}}>
-                         <div className="flex-sb" style={{marginBottom:15}}>
-                            <select className="input" style={{padding:'6px 10px', width:'auto', fontSize:'0.8rem'}} value={invoiceDetails.discount} onChange={e => setInvoiceDetails({...invoiceDetails, discount: Number(e.target.value)})}>
-                                <option value="0">Remise (0%)</option>
-                                {PARTNERS.map(p => <option key={p.name} value={p.val}>{p.name} (-{p.val}%)</option>)}
+                    <div style={{padding:25, background:'rgba(0,0,0,0.5)', borderTop:'1px solid var(--glass-border)'}}>
+                        <div className="flex-sb" style={{marginBottom:15}}>
+                            <select className="input" style={{width:'auto', padding:8}} onChange={e => setInvoice({...invoice, discount: Number(e.target.value)})}>
+                                <option value="0">Remise 0%</option>
+                                {PARTNERS.map(p => <option key={p.name} value={p.val}>{p.name} -{p.val}%</option>)}
                             </select>
-                            <span style={{color:'var(--success)', fontFamily:'var(--font-data)'}}>-{calculateTotal().discAmt.toFixed(0)} $</span>
-                         </div>
-                         <div className="flex-sb" style={{marginBottom:15, paddingTop:15, borderTop:'1px solid rgba(255,255,255,0.1)'}}>
-                            <span style={{fontWeight:800, fontSize:'1rem'}}>TOTAL NET</span>
-                            <span style={{fontWeight:800, fontSize:'1.6rem', color:'var(--primary)'}}>{calculateTotal().total.toFixed(0)} $</span>
-                         </div>
-                         <button className="btn btn-primary" style={{width:'100%', padding:14}} onClick={submitInvoice}>ENCAISSER</button>
+                            <div style={{textAlign:'right'}}>
+                                <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>TOTAL NET</div>
+                                <div style={{fontSize:'1.5rem', fontWeight:800, color:'var(--primary)', fontFamily:'var(--font-data)'}}>{calcTotal().total.toFixed(0)} $</div>
+                            </div>
+                        </div>
+                        <button className="btn btn-primary" style={{width:'100%'}} onClick={submitInvoice}>ENCAISSER</button>
                     </div>
                 </div>
             </div>
-        </section>
-      )}
+        )}
 
-      {/* VIEW: DIRECTION */}
-      {view === 'direction' && (
-        <section className="anim-enter" style={{maxWidth:900, margin:'0 auto'}}>
-            {!isAdminUnlocked ? (
-                <div className="card" style={{maxWidth:450, margin:'80px auto', textAlign:'center', borderColor:'var(--danger)'}}>
-                    <div style={{width:60, height:60, background:'rgba(239,68,68,0.1)', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 20px', color:'var(--danger)', fontSize:'1.8rem'}}>
-                        <i className="ri-lock-password-fill"></i>
-                    </div>
-                    <h3>Accès Restreint</h3>
-                    <div style={{display:'flex', gap:15, marginTop:20}}>
-                        <input type="password" className="input" style={{textAlign:'center', letterSpacing:5, fontSize:'1.1rem'}} placeholder="PIN" value={adminPin} onChange={e => setAdminPin(e.target.value)} />
-                        <button className="btn btn-primary" style={{background:'var(--danger)'}} onClick={() => { if(adminPin === '123459') setIsAdminUnlocked(true); else alert('Code Faux'); }}>OK</button>
-                    </div>
+        {/* MODAL ADMIN RH */}
+        {hrModal && (
+            <div className="login-gate" style={{background:'rgba(0,0,0,0.8)', zIndex:2000}}>
+                <div className="card" style={{width:500}}>
+                    <h3>RH: {hrModal.toUpperCase()}</h3>
+                    <form onSubmit={submitHR} style={{marginTop:20}}>
+                        <input className="input" placeholder="Cible / Montant" required style={{marginBottom:15}} onChange={e => setHrData({...hrData, target:e.target.value})} />
+                        <input type="date" className="input" required style={{marginBottom:15}} onChange={e => setHrData({...hrData, date:e.target.value})} />
+                        <textarea className="input" rows="4" placeholder="Motif..." required style={{marginBottom:20}} onChange={e => setHrData({...hrData, reason:e.target.value})}></textarea>
+                        <div className="grid-2">
+                            <button type="button" className="btn btn-ghost" onClick={() => setHrModal(null)}>ANNULER</button>
+                            <button type="submit" className="btn btn-primary">ENVOYER</button>
+                        </div>
+                    </form>
                 </div>
-            ) : (
-                <>
-                    <div className="flex-sb" style={{marginBottom:30}}>
-                        <h2>Panel Direction</h2>
-                        <button className="btn btn-ghost" onClick={() => setIsAdminUnlocked(false)}>Verrouiller</button>
-                    </div>
-                    <div className="grid-3">
-                         {['Recrutement', 'Convocation', 'Avertissement', 'Licenciement'].map(type => (
-                             <div key={type} className="widget" style={{minHeight:120}} onClick={() => setModalHR({show:true, type: type.toLowerCase()})}>
-                                 <div style={{fontWeight:700, fontSize:'1.1rem'}}>{type}</div>
-                                 <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Action RH</div>
-                                 <i className="ri-folder-user-line" style={{position:'absolute', right:15, bottom:15, fontSize:'2rem', opacity:0.1}}></i>
-                             </div>
-                         ))}
-                         <div className="widget" style={{minHeight:120, borderColor:'var(--success)'}} onClick={() => setModalHR({show:true, type: 'depense'})}>
-                                 <div style={{fontWeight:700, fontSize:'1.1rem', color:'var(--success)'}}>Dépense</div>
-                                 <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Note de frais</div>
-                         </div>
-                    </div>
-                </>
-            )}
-        </section>
-      )}
-
-      {/* VIEW: ANNUAIRE */}
-      {view === 'annuaire' && (
-        <section className="anim-enter">
-            <div className="flex-sb" style={{marginBottom:30}}>
-                <h2>Répertoire</h2>
-                <button className="btn btn-success" onClick={() => setModalAddContact(true)}>Nouveau Contact</button>
             </div>
-            <div className="grid-3">
-                {contacts.map((c, i) => (
-                    <div key={i} className="contact-card" onClick={() => setModalContact(c)}>
-                        <div style={{padding:25, textAlign:'center', display:'flex', flexDirection:'column', alignItems:'center'}}>
-                            <img src={c.photo || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} className="cc-avatar" />
-                            <div className="cc-role-badge" style={{marginBottom:10}}>{c.grade}</div>
-                            <div style={{fontWeight:700, fontSize:'1.1rem'}}>{c.prenom} {c.nom}</div>
+        )}
+
+        {/* VUE ADMIN */}
+        {view === 'admin' && (
+            <div className="anim-enter" style={{maxWidth:900, margin:'0 auto'}}>
+                {!unlocked ? (
+                    <div className="card" style={{textAlign:'center', maxWidth:400, margin:'50px auto'}}>
+                        <i className="ri-lock-password-fill" style={{fontSize:'3rem', color:'var(--danger)'}}></i>
+                        <h3>ACCÈS RESTREINT</h3>
+                        <div style={{display:'flex', gap:10, marginTop:20}}>
+                            <input type="password" className="input" placeholder="CODE PIN" style={{textAlign:'center', letterSpacing:5}} value={adminPin} onChange={e => setAdminPin(e.target.value)} />
+                            <button className="btn btn-primary" onClick={() => {if(adminPin==='123459') setUnlocked(true)}}>OK</button>
                         </div>
                     </div>
-                ))}
-            </div>
-        </section>
-      )}
-
-      {/* MODALS */}
-      {modalHR.show && (
-        <div className="login-gate" style={{background:'rgba(0,0,0,0.8)', zIndex:2000}}>
-            <div className="card" style={{width:500}}>
-                <h3>RH: {modalHR.type.toUpperCase()}</h3>
-                <form onSubmit={sendHR} style={{marginTop:20}}>
-                    <input className="input" placeholder="Cible / Montant" required style={{marginBottom:15}} value={hrForm.target} onChange={e => setHrForm({...hrForm, target: e.target.value})} />
-                    <input type="date" className="input" required style={{marginBottom:15}} value={hrForm.date} onChange={e => setHrForm({...hrForm, date: e.target.value})} />
-                    <textarea className="input" rows="4" placeholder="Raison..." required style={{marginBottom:20}} value={hrForm.reason} onChange={e => setHrForm({...hrForm, reason: e.target.value})}></textarea>
-                    <div className="grid-2">
-                        <button type="button" className="btn btn-ghost" onClick={() => setModalHR({show:false, type:''})}>Annuler</button>
-                        <button type="submit" className="btn btn-primary">Envoyer</button>
+                ) : (
+                    <div>
+                        <div className="flex-sb" style={{marginBottom:30}}>
+                            <h2>Panel Direction</h2>
+                            <button className="btn btn-ghost" onClick={() => setUnlocked(false)}>VERROUILLER</button>
+                        </div>
+                        <div className="grid-3">
+                            {['recrutement', 'convocation', 'avertissement', 'licenciement'].map(t => (
+                                <div key={t} className="widget" style={{minHeight:120}} onClick={() => setHrModal(t)}>
+                                    <div style={{fontWeight:700, textTransform:'uppercase'}}>{t}</div>
+                                    <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Action RH</div>
+                                </div>
+                            ))}
+                            <div className="widget" style={{minHeight:120, borderColor:'var(--success)'}} onClick={() => setHrModal('depense')}>
+                                <div style={{fontWeight:700, color:'var(--success)'}}>DÉPENSE</div>
+                                <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Trésorerie</div>
+                            </div>
+                        </div>
                     </div>
-                </form>
+                )}
             </div>
-        </div>
-      )}
+        )}
 
-      {modalContact && (
-        <div className="login-gate" style={{background:'rgba(0,0,0,0.9)', zIndex:2200}}>
-            <div className="card" style={{width:380, textAlign:'center', paddingTop:40, borderColor:'var(--primary)'}}>
-                <img src={modalContact.photo || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} style={{width:120, height:120, borderRadius:'50%', marginBottom:20, border:'4px solid var(--primary)', objectFit:'cover'}} />
-                <h3 style={{fontSize:'1.6rem', marginBottom:5}}>{modalContact.prenom} {modalContact.nom}</h3>
-                <div style={{fontSize:'1.4rem', fontWeight:700, color:'var(--text-muted)', marginBottom:30, fontFamily:'var(--font-data)'}}>{modalContact.tel}</div>
-                <div className="grid-2">
-                    <button className="btn btn-primary" onClick={() => alert("Simulation Appel...")}>APPELER</button>
-                    <button className="btn btn-ghost" onClick={() => setModalContact(null)}>FERMER</button>
+        {/* VUE ANNUAIRE */}
+        {view === 'annuaire' && (
+            <div className="anim-enter">
+                <div className="flex-sb" style={{marginBottom:30}}>
+                    <h2>Répertoire</h2>
+                    <button className="btn btn-primary" onClick={() => setContactModal(true)}>+ NOUVEAU</button>
                 </div>
-            </div>
-        </div>
-      )}
-
-      {modalAddContact && (
-        <div className="login-gate" style={{background:'rgba(0,0,0,0.8)', zIndex:2100}}>
-            <div className="card" style={{width:450}}>
-                <h3>Ajouter Contact</h3>
-                <form onSubmit={saveContact} style={{marginTop:20}}>
-                    <div className="grid-2" style={{marginBottom:15}}>
-                        <input className="input" placeholder="Nom" required onChange={e=>setNewContact({...newContact, nom:e.target.value})} />
-                        <input className="input" placeholder="Prénom" required onChange={e=>setNewContact({...newContact, prenom:e.target.value})} />
+                <div className="grid-3">
+                    {contacts.map((c,i) => (
+                        <div key={i} className="card" style={{textAlign:'center', padding:20}}>
+                            <div style={{width:80, height:80, background:'#222', borderRadius:'50%', margin:'0 auto 15px', display:'flex', alignItems:'center', justifyContent:'center', border:'2px solid var(--primary)'}}>
+                                <span style={{fontSize:'1.5rem', fontWeight:700}}>{c.nom[0]}</span>
+                            </div>
+                            <div style={{fontWeight:700}}>{c.prenom} {c.nom}</div>
+                            <div style={{fontSize:'0.8rem', color:'var(--primary)', marginBottom:5}}>{c.grade}</div>
+                            <div style={{fontFamily:'var(--font-data)', fontSize:'1.1rem'}}>{c.tel}</div>
+                        </div>
+                    ))}
+                </div>
+                
+                {contactModal && (
+                    <div className="login-gate" style={{background:'rgba(0,0,0,0.8)', zIndex:2000}}>
+                        <div className="card" style={{width:400}}>
+                            <h3>Nouveau Contact</h3>
+                            <div className="grid-2" style={{margin:'20px 0'}}>
+                                <input className="input" placeholder="Nom" onChange={e => setNewContact({...newContact, nom:e.target.value})} />
+                                <input className="input" placeholder="Prénom" onChange={e => setNewContact({...newContact, prenom:e.target.value})} />
+                            </div>
+                            <input className="input" placeholder="Téléphone" style={{marginBottom:20}} onChange={e => setNewContact({...newContact, tel:e.target.value})} />
+                            <div className="grid-2">
+                                <button className="btn btn-ghost" onClick={() => setContactModal(false)}>ANNULER</button>
+                                <button className="btn btn-primary" onClick={saveContact}>SAUVEGARDER</button>
+                            </div>
+                        </div>
                     </div>
-                    <input className="input" placeholder="Tel" required style={{marginBottom:15}} onChange={e=>setNewContact({...newContact, tel:e.target.value})} />
-                    <input className="input" placeholder="URL Photo" style={{marginBottom:20}} onChange={e=>setNewContact({...newContact, photo:e.target.value})} />
-                    <div className="grid-2">
-                        <button type="button" className="btn btn-ghost" onClick={() => setModalAddContact(false)}>Annuler</button>
-                        <button type="submit" className="btn btn-success">Sauvegarder</button>
-                    </div>
-                </form>
+                )}
             </div>
-        </div>
-      )}
-
+        )}
     </div>
   );
 }
