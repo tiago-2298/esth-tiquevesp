@@ -1,13 +1,4 @@
-C'est noté. Je vais fusionner **l'intelligence React/Next.js** (logique de panier, state, audio) avec **l'esthétique pure "Titanium"** de ton code HTML (CSS variables, Glassmorphism, Grille de fond, Bento Grid).
 
-Voici le fichier `page.js` complet, prêt à l'emploi. Il utilise la structure **Next.js** mais avec le design exact que tu as fourni.
-
-### Instructions d'installation rapide :
-
-1. Assure-toi d'avoir configuré ton `layout.js` pour inclure la police Inter ou ajoute le lien Google Fonts.
-2. Copie ce code dans `app/page.js`.
-
-```javascript
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
@@ -520,3 +511,4 @@ export default function VespucciManager() {
 }
 
 ```
+
