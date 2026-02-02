@@ -1,16 +1,14 @@
-// Fichier: app/layout.js
+import './globals.css';
 
 export const metadata = {
-  title: 'Vespucci - Titanium',
-  description: 'Manager System',
-}
+  title: 'Vespucci Titanium',
+  description: 'Manager Système V5',
+};
 
 export default function RootLayout({ children }) {
   return (
     <html lang="fr">
-      <body style={{ margin: 0, padding: 0, backgroundColor: '#0f0f1a' }}>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
-  )
+  );
 }
