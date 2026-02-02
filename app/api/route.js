@@ -1,16 +1,33 @@
 // app/api/route.js
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 import { NextResponse } from "next/server";
 import { google } from "googleapis";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 /* ----------------------------- ENV / CONFIG ----------------------------- */
 
-const env = (k) => String(process.env[k] || "").trim().replace(/^['"]|['"]$/g, "");
+const env = (k) =>
+  String(process.env[k] || "")
+    .trim()
+    .replace(/^['"]|['"]$/g, ""); // enlève un éventuel "..." ou '...'
+
 const SHEET_ID = env("GOOGLE_SHEET_ID");
 const CLIENT_EMAIL = env("GOOGLE_CLIENT_EMAIL");
-const PRIVATE_KEY = env("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n");
+
+// Supporte:
+// - clé avec "\n"
+// - clé multi-lignes
+// - clé entourée de guillemets
+const cleanPrivateKey = (raw) => {
+  if (!raw) return "";
+  let key = String(raw).replace(/\\n/g, "\n");
+  key = key.replace(/^\s*"+|"+\s*$/g, "");
+  key = key.replace(/^\s*'+|'+\s*$/g, "");
+  return key;
+};
+
+const PRIVATE_KEY = cleanPrivateKey(process.env.GOOGLE_PRIVATE_KEY);
 
 const WEBHOOKS = {
   FACTURATION: env("WEBHOOK_FACTURATION"),
@@ -58,10 +75,13 @@ async function readJson(req) {
 }
 
 function ok(data) {
-  return NextResponse.json({ success: true, ...data });
+  return NextResponse.json({ success: true, ...data }, { headers: { "cache-control": "no-store" } });
 }
-function bad(message, status = 400) {
-  return NextResponse.json({ success: false, error: message }, { status });
+function bad(message, status = 400, extra = {}) {
+  return NextResponse.json(
+    { success: false, error: message, ...extra },
+    { status, headers: { "cache-control": "no-store" } }
+  );
 }
 
 async function sendDiscordWebhook(url, payload) {
@@ -77,22 +97,44 @@ async function sendDiscordWebhook(url, payload) {
   }
 }
 
+function extractGoogleError(err) {
+  const status = err?.code || err?.response?.status || 500;
+  const message =
+    err?.message ||
+    err?.response?.data?.error?.message ||
+    "Erreur Google API";
+
+  return {
+    status: typeof status === "number" ? status : 500,
+    message,
+    details: err?.response?.data?.error || null,
+  };
+}
+
 /* ------------------------------ SHEETS AUTH ----------------------------- */
 
 async function getSheets() {
   if (!SHEET_ID || !CLIENT_EMAIL || !PRIVATE_KEY) {
-    throw new Error("ENV manquantes: GOOGLE_SHEET_ID / GOOGLE_CLIENT_EMAIL / GOOGLE_PRIVATE_KEY");
+    return { sheets: null, error: "ENV manquantes: GOOGLE_SHEET_ID / GOOGLE_CLIENT_EMAIL / GOOGLE_PRIVATE_KEY" };
   }
 
-  const auth = new google.auth.JWT(CLIENT_EMAIL, null, PRIVATE_KEY, [
-    "https://www.googleapis.com/auth/spreadsheets",
-  ]);
+  // Auth moderne et fiable (évite les appels non-identifiés)
+  const auth = new google.auth.GoogleAuth({
+    credentials: {
+      client_email: CLIENT_EMAIL,
+      private_key: PRIVATE_KEY,
+    },
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"], // read/write (tu append/update)
+  });
 
-  return google.sheets({ version: "v4", auth });
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: "v4", auth: client });
+  return { sheets, error: null };
 }
 
 async function tryGetValues(sheets, ranges) {
   let lastErr = null;
+
   for (const range of ranges) {
     try {
       const res = await sheets.spreadsheets.values.get({
@@ -105,6 +147,7 @@ async function tryGetValues(sheets, ranges) {
       lastErr = e;
     }
   }
+
   throw lastErr || new Error("Aucune plage trouvée");
 }
 
@@ -149,12 +192,18 @@ async function ensureHeadersIfEmpty(sheets, sheetName, headers) {
 /* ---------------------------- DATA LOADERS ----------------------------- */
 
 async function loadConfig(sheets) {
-  const values = await tryGetValues(sheets, [
-    `'Config'!A1:B250`,
-    `'CONFIG'!A1:B250`,
-    `'Parametres'!A1:B250`,
-    `'Paramètres'!A1:B250`,
-  ]);
+  // ✅ IMPORTANT: si l’onglet config n’existe pas, on retourne des defaults au lieu de 500
+  let values = [];
+  try {
+    values = await tryGetValues(sheets, [
+      `'Config'!A1:B250`,
+      `'CONFIG'!A1:B250`,
+      `'Parametres'!A1:B250`,
+      `'Paramètres'!A1:B250`,
+    ]);
+  } catch {
+    values = [];
+  }
 
   const map = {};
   for (let i = 0; i < values.length; i++) {
@@ -299,7 +348,14 @@ async function buildMeta(sheets) {
   };
 }
 
-function calcInvoiceTotals({ items, prices, discountActivated, enterpriseName, enterprises, employeeDiscountPct }) {
+function calcInvoiceTotals({
+  items,
+  prices,
+  discountActivated,
+  enterpriseName,
+  enterprises,
+  employeeDiscountPct,
+}) {
   const subtotal = items.reduce((s, it) => {
     const pu = Number(prices[it.desc] ?? 0);
     const qty = Math.floor(Number(it.qty) || 0);
@@ -326,13 +382,21 @@ function calcInvoiceTotals({ items, prices, discountActivated, enterpriseName, e
 
 /* --------------------------------- API --------------------------------- */
 
+export async function GET(request) {
+  // pratique pour tester vite dans le navigateur
+  const url = new URL(request.url);
+  const action = url.searchParams.get("action") || "getMeta";
+  return POST(new Request(request.url, { method: "POST", body: JSON.stringify({ action }) }));
+}
+
 export async function POST(request) {
   try {
     const body = await readJson(request);
     const action = String(body?.action || "getMeta");
     const data = body?.data || {};
 
-    const sheets = await getSheets();
+    const { sheets, error: authErr } = await getSheets();
+    if (authErr) return bad(authErr, 500);
 
     if (action === "getMeta") {
       const meta = await buildMeta(sheets);
@@ -352,7 +416,8 @@ export async function POST(request) {
       const discountActivated = toBool(data.discountActivated);
 
       if (!employee || !meta.employees.includes(employee)) return bad("Employé invalide");
-      if (!invoiceNumber || invoiceNumber.length < 3 || invoiceNumber.length > 40) return bad("Numéro facture invalide");
+      if (!invoiceNumber || invoiceNumber.length < 3 || invoiceNumber.length > 40)
+        return bad("Numéro facture invalide");
 
       const rawItems = Array.isArray(data.items) ? data.items : [];
       const items = rawItems
@@ -363,7 +428,6 @@ export async function POST(request) {
         .filter((i) => i.desc && i.qty > 0);
 
       if (items.length === 0) return bad("Aucun article");
-
       for (const it of items) {
         if (!(it.desc in meta.prices)) return bad(`Produit invalide: ${it.desc}`);
       }
@@ -636,8 +700,21 @@ export async function POST(request) {
 
     return bad("Action inconnue", 400);
   } catch (err) {
-    console.error("API error:", err?.message || err);
-    return bad(err?.message || String(err), 500);
+    const g = extractGoogleError(err);
+    console.error("API error:", g);
+
+    // Hint rapide pour ton erreur "unregistered callers"
+    const hint =
+      g.status === 403 && /unregistered callers/i.test(g.message)
+        ? "Le serveur appelle Google sans identité. Vérifie GOOGLE_CLIENT_EMAIL / GOOGLE_PRIVATE_KEY, et partage le Sheet au service account en Lecteur."
+        : g.status === 403
+          ? "403: Partage le Google Sheet avec GOOGLE_CLIENT_EMAIL (Lecteur)."
+          : g.status === 401
+            ? "401: Private key / client email invalides (souvent clé mal collée)."
+            : g.status === 404
+              ? "404: GOOGLE_SHEET_ID incorrect."
+              : "Regarde les logs Vercel (Functions) pour le détail.";
+
+    return bad(g.message, 500, { status: g.status, hint, details: g.details });
   }
 }
-
