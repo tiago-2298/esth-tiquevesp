@@ -1,150 +1,18 @@
+// app/api/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { google } from 'googleapis';
 import { NextResponse } from 'next/server';
 
-/**
- * =========================================================
- *  CONFIG (COPIE LOGIQUE Apps Script)
- * =========================================================
- */
-const APP_VERSION = '4.6';
-const CURRENCY = { symbol: '$', code: 'USD' };
+// =====================
+// ENV (SECRETS)
+// =====================
+const SHEET_ID = cleanEnv(process.env.GOOGLE_SHEET_ID);
+const CLIENT_EMAIL = cleanEnv(process.env.GOOGLE_CLIENT_EMAIL);
+const PRIVATE_KEY = (cleanEnv(process.env.GOOGLE_PRIVATE_KEY) || '').replace(/\\n/g, '\n');
 
-const CONFIG = {
-  RATE_LIMIT: { MAX_REQUESTS_PER_MINUTE: 20, CACHE_DURATION: 60_000 },
-  VALIDATION: {
-    MIN_INVOICE_LENGTH: 3,
-    MAX_INVOICE_LENGTH: 20,
-    MAX_ITEMS_PER_REQUEST: 50,
-    MIN_QUANTITY: 1,
-    MAX_QUANTITY: 9999,
-  },
-};
-
-// --- Produits & Prix (identiques à ton Apps Script) ---
-const PRODUCTS = {
-  tete: ['Petit Tatouage (tête)', 'Moyen Tatouage (tête)', 'Grand Tatouage (tête)'],
-  torse: ['Petit Tatouage (Torse/Dos)', 'Moyen Tatouage (Torse/Dos)', 'Grand Tatouage (Torse/Dos)'],
-  jambes: ['Petit Tatouage (Jambes)', 'Moyen Tatouage (Jambes)', 'Grand Tatouage (Jambes)'],
-  bras: ['Petit Tatouage (Bras)', 'Moyen Tatouage (Bras)', 'Grand Tatouage (Bras)'],
-  custom: ['Tatouage Custom'],
-  lazer: ['Petit Laser', 'Moyen Laser', 'Grand Laser'],
-  coiffeur: ['Coupe', 'Couleur', 'Barbe', 'Dégradé', 'Palette', 'Épilation'],
-  services: ['Livraison NORD', 'Livraison SUD'],
-};
-
-const PRICE_LIST = {
-  'Petit Tatouage (tête)': 350.0,
-  'Moyen Tatouage (tête)': 450.0,
-  'Grand Tatouage (tête)': 600.0,
-
-  'Petit Tatouage (Bras)': 450.0,
-  'Moyen Tatouage (Bras)': 600.0,
-  'Grand Tatouage (Bras)': 800.0,
-
-  'Petit Tatouage (Jambes)': 450.0,
-  'Moyen Tatouage (Jambes)': 600.0,
-  'Grand Tatouage (Jambes)': 800.0,
-
-  'Petit Tatouage (Torse/Dos)': 600.0,
-  'Moyen Tatouage (Torse/Dos)': 800.0,
-  'Grand Tatouage (Torse/Dos)': 1100.0,
-
-  'Tatouage Custom': 3000.0,
-
-  'Petit Laser': 250.0,
-  'Moyen Laser': 500.0,
-  'Grand Laser': 750.0,
-
-  'Coupe': 200.0,
-  'Couleur': 100.0,
-  'Barbe': 100.0,
-  'Dégradé': 100.0,
-  'Palette': 150.0,
-  'Épilation': 50.0,
-
-  'Livraison NORD': 50.0,
-  'Livraison SUD': 50.0,
-};
-
-const ENTERPRISES_FALLBACK = {
-  HenHouse: { discount: 30 },
-  'Auto Exotic': { discount: 30 },
-  LifeInvader: { discount: 30 },
-  Delight: { discount: 30 },
-  'Employé Confirmé': { discount: 30 },
-  'LTD Sandy Shores': { discount: 30 },
-};
-
-// Annuaire fallback (si tu ne crées pas d’onglet Employés)
-const DIRECTORY_FALLBACK = [
-  { name: 'Julio Alvarez', role: 'Patron', avatar: 'https://i.goopics.net/pjtgz1.png', phone: '682-6030' },
-  { name: 'Soren Bloom', role: 'Co-Patron', avatar: 'https://i.goopics.net/o6gnq3.png', phone: '575-5535' },
-  { name: 'Sun Price', role: 'DRH', avatar: 'https://i.goopics.net/t7adhn.png', phone: '740-3572' },
-  { name: 'Andres Hernandez', role: 'Responsable Coiffeur', avatar: 'https://i.goopics.net/yxrjrs.png', phone: '212-0212' },
-  { name: 'Mason Bloom', role: 'Responsable Tatoueur', avatar: 'https://i.goopics.net/lsjb6c.png', phone: '646-5195' },
-];
-
-// Remises employés fallback (identique Apps Script)
-const EMPLOYEE_DISCOUNTS_FALLBACK = {
-  'Alvarez Julio': { role: 'PDG', discount: 0 },
-  'Bloom Soren': { role: 'Co-PDG', discount: 0 },
-  'Price Sun': { role: 'DRH', discount: 74 },
-  'Hernandez Andres': { role: 'RE', discount: 59 },
-  'Mason Bloom': { role: 'RE', discount: 59 },
-  'Jimenez Taziñio': { role: 'Spécialiste', discount: 55 },
-  'Rosales Kali': { role: 'Spécialiste', discount: 55 },
-  'Daikii Isuke': { role: 'Tatoueur Expérimenté', discount: 44 },
-  'Makara Chariya Chan': { role: 'Spécialiste', discount: 55 },
-  'Price Moon': { role: 'Spécialiste', discount: 55 },
-  'Jayden Lockett': { role: 'Spécialiste', discount: 55 },
-  'Jayden Coleman': { role: 'Tatoueur Expérimenté', discount: 44 },
-  'Moon Veda': { role: 'Coiffeur Novice', discount: 40 },
-  'Inaya Kinslow': { role: 'Coiffeur Novice', discount: 40 },
-  'Elijah Gonzalez': { role: 'Tatoueur Novice', discount: 37 },
-  'Obito Valeria': { role: 'Coiffeur Novice', discount: 40 },
-  'Kilyan Smith': { role: 'Tatoueur Novice', discount: 37 },
-  'Lily Summer': { role: 'Coiffeur Novice', discount: 40 },
-};
-
-const EMPLOYEES_FALLBACK = Object.keys(EMPLOYEE_DISCOUNTS_FALLBACK)
-  .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
-
-/**
- * =========================================================
- *  ENV + GOOGLE AUTH
- * =========================================================
- */
-function cleanEnv(v) {
-  return (v || '').trim().replace(/^['"]|['"]$/g, '');
-}
-
-async function getAuthSheets() {
-  const privateKeyInput = cleanEnv(process.env.GOOGLE_PRIVATE_KEY);
-  const clientEmail = cleanEnv(process.env.GOOGLE_CLIENT_EMAIL);
-  const sheetId = cleanEnv(process.env.GOOGLE_SHEET_ID);
-
-  if (!privateKeyInput || !clientEmail || !sheetId) {
-    throw new Error('ENV manquantes: GOOGLE_PRIVATE_KEY / GOOGLE_CLIENT_EMAIL / GOOGLE_SHEET_ID');
-  }
-
-  const privateKey = privateKeyInput.replace(/\\n/g, '\n');
-
-  const auth = new google.auth.JWT(clientEmail, null, privateKey, [
-    'https://www.googleapis.com/auth/spreadsheets',
-  ]);
-
-  return google.sheets({ version: 'v4', auth });
-}
-
-/**
- * =========================================================
- *  DISCORD WEBHOOKS (SERVER ONLY)
- *  Mets tout en ENV, ne JAMAIS mettre un webhook côté client.
- * =========================================================
- */
+// Discord Webhooks (NE PAS METTRE EN DUR)
 const WEBHOOKS = {
   FACTURATION: cleanEnv(process.env.WEBHOOK_FACTURATION),
   CONVOCATION: cleanEnv(process.env.WEBHOOK_CONVOCATION),
@@ -155,588 +23,648 @@ const WEBHOOKS = {
   DEPENSE: cleanEnv(process.env.WEBHOOK_DEPENSE),
 };
 
-async function postToDiscordWebhook(url, payload) {
-  if (!url) return null;
+// =====================
+// HELPERS
+// =====================
+function cleanEnv(v?: string) {
+  return (v || '').trim().replace(/^['"]|['"]$/g, '');
+}
+
+function normHeader(s: string) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove accents
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function toNumber(v: any) {
+  if (v === null || v === undefined) return 0;
+  const s = String(v).replace('$', '').replace(',', '.').trim();
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function toBool(v: any) {
+  const s = String(v ?? '').trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'oui' || s === 'yes';
+}
+
+async function getAuthSheets() {
+  if (!SHEET_ID || !CLIENT_EMAIL || !PRIVATE_KEY) {
+    throw new Error('ENV manquantes: GOOGLE_SHEET_ID / GOOGLE_CLIENT_EMAIL / GOOGLE_PRIVATE_KEY');
+  }
+
+  const auth = new google.auth.JWT(
+    CLIENT_EMAIL,
+    null,
+    PRIVATE_KEY,
+    ['https://www.googleapis.com/auth/spreadsheets']
+  );
+
+  return google.sheets({ version: 'v4', auth });
+}
+
+async function tryGetValues(sheets: any, ranges: string[]) {
+  let lastErr: any = null;
+  for (const r of ranges) {
+    try {
+      const res = await sheets.spreadsheets.values.get({
+        spreadsheetId: SHEET_ID,
+        range: r,
+        valueRenderOption: 'UNFORMATTED_VALUE',
+      });
+      return { range: r, values: res.data.values || [] };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('Aucune plage trouvée');
+}
+
+function tableFrom(values: any[][]) {
+  const rows = values || [];
+  if (rows.length < 2) return { headers: [], items: [] as Record<string, any>[] };
+
+  const headersRaw = rows[0].map((h) => normHeader(h));
+  const items: Record<string, any>[] = [];
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length === 0) continue;
+
+    const obj: Record<string, any> = {};
+    headersRaw.forEach((h, idx) => {
+      obj[h] = row[idx];
+    });
+
+    // ignore fully empty lines
+    const hasAny = Object.values(obj).some((x) => String(x ?? '').trim() !== '');
+    if (hasAny) items.push(obj);
+  }
+
+  return { headers: headersRaw, items };
+}
+
+async function sendDiscordWebhook(url: string | undefined, payload: any) {
+  if (!url) return;
+
   try {
-    const res = await fetch(url, {
+    await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    // Discord renvoie souvent 204
-    if (!(res.status === 200 || res.status === 204)) {
-      const text = await res.text().catch(() => '');
-      console.error('Discord error:', res.status, text);
-      return null;
-    }
-    return true;
   } catch (e) {
-    console.error('Discord fetch error:', e?.message || e);
-    return null;
+    console.error('Discord webhook error:', e);
   }
 }
 
-/**
- * =========================================================
- *  RATE LIMIT (best effort: serverless = pas garanti)
- * =========================================================
- */
-const requestCache = new Map();
-function checkRateLimit(key) {
-  const now = Date.now();
-  const requests = requestCache.get(key) || [];
-  const recent = requests.filter((t) => now - t < CONFIG.RATE_LIMIT.CACHE_DURATION);
-  if (recent.length >= CONFIG.RATE_LIMIT.MAX_REQUESTS_PER_MINUTE) {
-    throw new Error('Trop de requêtes.');
-  }
-  recent.push(now);
-  requestCache.set(key, recent);
+function todayFR() {
+  return new Date().toLocaleDateString('fr-FR');
 }
 
-/**
- * =========================================================
- *  SHEET HELPERS
- * =========================================================
- */
-const SHEET_NAMES = {
-  FACTURES: 'Factures',
-  RH: 'RH',
-  CALCULATION: 'Calculation',
-  EMPLOYES: 'Employés', // optionnel (si tu veux tout piloter depuis le Sheet)
-};
+function isoNow() {
+  return new Date().toISOString();
+}
 
-async function safeGetSheetTitles(sheets, spreadsheetId) {
-  const meta = await sheets.spreadsheets.get({
-    spreadsheetId,
-    fields: 'sheets.properties.title',
+function makeDepenseId() {
+  const ts = Math.floor(Date.now() / 1000);
+  return `DEP-${String(ts).slice(-6)}`;
+}
+
+// =====================
+// SHEET LOADING (100% DATA FROM SHEET)
+// =====================
+async function loadConfig(sheets: any) {
+  // Onglet conseillé: "Config" (clé/valeur)
+  // Exemple:
+  // A1=key | B1=value
+  // APP_VERSION | 4.6
+  // CURRENCY_SYMBOL | $
+  // CURRENCY_CODE | USD
+  // ADMIN_PIN | 123459
+  const { values } = await tryGetValues(sheets, [
+    `'Config'!A1:B50`,
+    `'CONFIG'!A1:B50`,
+    `'Parametres'!A1:B50`,
+    `'Paramètres'!A1:B50`,
+  ]);
+
+  const { items } = tableFrom(values);
+  const map: Record<string, string> = {};
+  for (const r of items) {
+    const k = String(r['key'] ?? '').trim();
+    const v = String(r['value'] ?? '').trim();
+    if (k) map[k] = v;
+  }
+
+  // si jamais l’onglet est vide, on renvoie des valeurs minimales (pas de data métier)
+  return {
+    appVersion: map['APP_VERSION'] || '',
+    currencySymbol: map['CURRENCY_SYMBOL'] || '$',
+    currencyCode: map['CURRENCY_CODE'] || 'USD',
+    adminPin: map['ADMIN_PIN'] || '',
+    usernameDiscord: map['DISCORD_USERNAME'] || 'Secretaire Vespucci',
+    avatarDiscord: map['DISCORD_AVATAR_URL'] || '',
+  };
+}
+
+async function loadEmployees(sheets: any) {
+  // Onglet conseillé: "Employés"
+  // Colonnes: name | role | discount | phone | avatar
+  const { values } = await tryGetValues(sheets, [
+    `'Employés'!A1:Z500`,
+    `'Employes'!A1:Z500`,
+    `'Employees'!A1:Z500`,
+  ]);
+
+  const { items } = tableFrom(values);
+
+  // mapping souple via headers normalisés
+  const out = items.map((r) => ({
+    name: String(r['name'] ?? r['nom'] ?? r['prenom_nom'] ?? '').trim(),
+    role: String(r['role'] ?? r['poste'] ?? '').trim(),
+    discount: toNumber(r['discount'] ?? r['remise'] ?? r['reduction'] ?? 0),
+    phone: String(r['phone'] ?? r['tel'] ?? r['telephone'] ?? '').trim(),
+    avatar: String(r['avatar'] ?? r['photo'] ?? r['image'] ?? '').trim(),
+  })).filter(e => e.name);
+
+  // tri alphabétique FR
+  out.sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+  return out;
+}
+
+async function loadCatalogue(sheets: any) {
+  // Onglet conseillé: "Catalogue"
+  // Colonnes: category | product | price
+  const { values } = await tryGetValues(sheets, [
+    `'Catalogue'!A1:Z2000`,
+    `'CATALOGUE'!A1:Z2000`,
+    `'Produits'!A1:Z2000`,
+  ]);
+
+  const { items } = tableFrom(values);
+
+  const rows = items.map((r) => ({
+    category: String(r['category'] ?? r['categorie'] ?? r['cat'] ?? '').trim(),
+    product: String(r['product'] ?? r['produit'] ?? r['name'] ?? '').trim(),
+    price: toNumber(r['price'] ?? r['prix'] ?? r['pu'] ?? 0),
+  })).filter(x => x.category && x.product);
+
+  return rows;
+}
+
+async function loadEnterprises(sheets: any) {
+  // Onglet conseillé: "Entreprises"
+  // Colonnes: name | discount | phone | image
+  const { values } = await tryGetValues(sheets, [
+    `'Entreprises'!A1:Z500`,
+    `'Enterprises'!A1:Z500`,
+    `'Partenaires'!A1:Z500`,
+  ]);
+
+  const { items } = tableFrom(values);
+
+  const rows = items.map((r) => ({
+    name: String(r['name'] ?? r['entreprise'] ?? r['partner'] ?? '').trim(),
+    discount: toNumber(r['discount'] ?? r['remise'] ?? r['reduction'] ?? 0),
+    phone: String(r['phone'] ?? r['tel'] ?? r['telephone'] ?? '').trim(),
+    image: String(r['image'] ?? r['avatar'] ?? r['photo'] ?? '').trim(),
+  })).filter(x => x.name);
+
+  rows.sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+  return rows;
+}
+
+async function ensureHeadersIfEmpty(sheets: any, sheetName: string, headers: string[]) {
+  // si la feuille est vide, on met les headers
+  const check = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: `'${sheetName}'!A1:Z1`,
+    valueRenderOption: 'UNFORMATTED_VALUE',
   });
-  return (meta.data.sheets || []).map((s) => s.properties?.title).filter(Boolean);
-}
 
-async function ensureSheetWithHeaders(sheets, spreadsheetId, sheetName, headers) {
-  const titles = await safeGetSheetTitles(sheets, spreadsheetId);
-  if (!titles.includes(sheetName)) {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] },
-    });
-  }
+  const firstRow = check.data.values?.[0] || [];
+  const hasAny = firstRow.some((x: any) => String(x ?? '').trim() !== '');
+  if (hasAny) return;
 
-  // Écrit les headers en ligne 1
   await sheets.spreadsheets.values.update({
-    spreadsheetId,
-    range: `'${sheetName}'!A1`,
+    spreadsheetId: SHEET_ID,
+    range: `'${sheetName}'!A1:${String.fromCharCode(64 + headers.length)}1`,
     valueInputOption: 'RAW',
     requestBody: { values: [headers] },
   });
 }
 
-/**
- * =========================================================
- *  META CACHE (pour éviter 50 lectures Sheet)
- * =========================================================
- */
-let metaCache = { at: 0, value: null };
-const META_TTL_MS = 60_000;
+// =====================
+// META (équivalent getAppMeta Apps Script)
+// =====================
+async function buildMeta(sheets: any) {
+  const config = await loadConfig(sheets);
+  const employeesFull = await loadEmployees(sheets);
+  const catalogue = await loadCatalogue(sheets);
+  const enterprisesRows = await loadEnterprises(sheets);
 
-function productsFlat() {
-  return Object.values(PRODUCTS).flat();
-}
-
-/**
- * Si tu crées un onglet "Employés", on récupère:
- *  A: Name (ex: "Alvarez Julio")
- *  B: Role
- *  C: Phone
- *  D: Avatar URL
- *  E: Discount (number)
- *
- * Sinon on fallback sur les constantes.
- */
-async function readEmployeesFromSheet(sheets, spreadsheetId) {
-  try {
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: `'${SHEET_NAMES.EMPLOYES}'!A2:E200`,
-      valueRenderOption: 'UNFORMATTED_VALUE',
-    });
-
-    const rows = res.data.values || [];
-    const clean = rows
-      .filter((r) => r && r[0])
-      .map((r) => ({
-        name: String(r[0] ?? '').trim(),
-        role: String(r[1] ?? '').trim(),
-        phone: String(r[2] ?? '').trim(),
-        avatar: String(r[3] ?? '').trim(),
-        discount: Number(r[4] ?? 0) || 0,
-      }))
-      .filter((x) => x.name);
-
-    if (!clean.length) return null;
-
-    const employees = clean.map((x) => x.name).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
-
-    const directory = clean.map((x) => ({
-      name: x.name.includes(' ') ? x.name.split(' ').reverse().join(' ') : x.name, // option "prenom nom"
-      role: x.role || '',
-      avatar: x.avatar || '',
-      phone: x.phone || '',
-    }));
-
-    const employeeDiscounts = {};
-    for (const e of clean) {
-      employeeDiscounts[e.name] = { role: e.role || '', discount: e.discount || 0 };
-    }
-
-    return { employees, directory, employeeDiscounts };
-  } catch {
-    return null;
-  }
-}
-
-async function getMetaInternal() {
-  const now = Date.now();
-  if (metaCache.value && now - metaCache.at < META_TTL_MS) return metaCache.value;
-
-  const spreadsheetId = cleanEnv(process.env.GOOGLE_SHEET_ID);
-
-  // Si pas d’ENV google, on renvoie fallback (pratique en dev UI)
-  if (!spreadsheetId || !process.env.GOOGLE_CLIENT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
-    const fallback = {
-      version: APP_VERSION,
-      serverTime: new Date().toISOString(),
-      currencySymbol: CURRENCY.symbol,
-      currencyCode: CURRENCY.code,
-      employees: EMPLOYEES_FALLBACK,
-      directory: DIRECTORY_FALLBACK,
-      employeeDiscounts: EMPLOYEE_DISCOUNTS_FALLBACK,
-      products: productsFlat(),
-      productsByCategory: PRODUCTS,
-      prices: PRICE_LIST,
-      enterprises: ENTERPRISES_FALLBACK,
-      discordConfigured: Boolean(WEBHOOKS.FACTURATION),
-      sheetsConfigured: false,
-      totals: { employees: EMPLOYEES_FALLBACK.length, products: productsFlat().length },
-    };
-    metaCache = { at: now, value: fallback };
-    return fallback;
+  // employeeDiscounts map
+  const employeeDiscounts: Record<string, { role: string; discount: number }> = {};
+  for (const e of employeesFull) {
+    employeeDiscounts[e.name] = { role: e.role, discount: e.discount };
   }
 
-  const sheets = await getAuthSheets();
+  // directory (annuaire)
+  const directory = employeesFull.map(e => ({
+    name: e.name,
+    role: e.role,
+    avatar: e.avatar,
+    phone: e.phone,
+  }));
 
-  const fromSheet = await readEmployeesFromSheet(sheets, spreadsheetId);
+  // productsByCategory & prices
+  const productsByCategory: Record<string, string[]> = {};
+  const prices: Record<string, number> = {};
+  for (const p of catalogue) {
+    if (!productsByCategory[p.category]) productsByCategory[p.category] = [];
+    productsByCategory[p.category].push(p.product);
+    prices[p.product] = p.price;
+  }
 
-  const meta = {
-    version: APP_VERSION,
+  // flatten
+  const products = Object.values(productsByCategory).flat();
+
+  // enterprises map
+  const enterprises: Record<string, any> = {};
+  for (const ent of enterprisesRows) {
+    enterprises[ent.name] = { discount: ent.discount, phone: ent.phone, image: ent.image };
+  }
+
+  return {
+    version: config.appVersion || 'unknown',
     serverTime: new Date().toISOString(),
-    currencySymbol: CURRENCY.symbol,
-    currencyCode: CURRENCY.code,
-    employees: fromSheet?.employees || EMPLOYEES_FALLBACK,
-    directory: fromSheet?.directory || DIRECTORY_FALLBACK,
-    employeeDiscounts: fromSheet?.employeeDiscounts || EMPLOYEE_DISCOUNTS_FALLBACK,
-    products: productsFlat(),
-    productsByCategory: PRODUCTS,
-    prices: PRICE_LIST,
-    enterprises: ENTERPRISES_FALLBACK,
-    discordConfigured: Boolean(WEBHOOKS.FACTURATION),
-    sheetsConfigured: Boolean(spreadsheetId),
+    employees: employeesFull.map(e => e.name),
+    directory,
+    employeeDiscounts,
+    products,
+    productsByCategory,
+    prices,
+    enterprises,
+    currencySymbol: config.currencySymbol,
+    currencyCode: config.currencyCode,
+    adminPinConfigured: !!config.adminPin,
+    discordConfigured: !!WEBHOOKS.FACTURATION,
+    sheetsConfigured: !!SHEET_ID,
     totals: {
-      employees: (fromSheet?.employees || EMPLOYEES_FALLBACK).length,
-      products: productsFlat().length,
+      employees: employeesFull.length,
+      products: products.length,
     },
+    ui: {
+      discordUsername: config.usernameDiscord,
+      discordAvatarUrl: config.avatarDiscord,
+      adminPin: config.adminPin, // si tu préfères ne jamais le renvoyer au client: supprime cette ligne et check côté serveur only
+    }
   };
-
-  metaCache = { at: now, value: meta };
-  return meta;
 }
 
-/**
- * =========================================================
- *  VALIDATION + CALCULS (identiques Apps Script)
- * =========================================================
- */
-function formatAmount(n) {
-  const v = Number(n) || 0;
-  return `${CURRENCY.symbol}${v.toFixed(2)}`;
-}
+// =====================
+// BUSINESS (équivalent Apps Script)
+// =====================
+function calcInvoiceTotals(params: {
+  items: Array<{ desc: string; qty: number }>;
+  prices: Record<string, number>;
+  discountActivated: boolean;
+  enterpriseName?: string;
+  enterprises: Record<string, { discount: number }>;
+  employeeDiscountPct: number;
+}) {
+  const { items, prices, discountActivated, enterpriseName, enterprises, employeeDiscountPct } = params;
 
-function validateEmployee(meta, emp) {
-  if (!emp || !meta.employees.includes(emp)) throw new Error('Employé invalide');
-}
+  const subtotal = items.reduce((s, it) => {
+    const pu = Number(prices[it.desc] ?? 0);
+    const qty = Math.floor(Number(it.qty) || 0);
+    return s + pu * qty;
+  }, 0);
 
-function validateInvoiceNumber(num) {
-  const s = String(num || '').trim();
-  if (s.length < CONFIG.VALIDATION.MIN_INVOICE_LENGTH || s.length > CONFIG.VALIDATION.MAX_INVOICE_LENGTH) {
-    throw new Error('Numéro facture invalide');
-  }
-  return s;
-}
+  let discountPct = 0;
+  let discountType = 'Aucune';
 
-function validateItems(items) {
-  if (!Array.isArray(items) || !items.length) throw new Error('Aucun article');
-  if (items.length > CONFIG.VALIDATION.MAX_ITEMS_PER_REQUEST) throw new Error('Trop d’articles');
-
-  const clean = items
-    .map((i) => ({
-      desc: String(i?.desc || i?.name || '').trim(),
-      qty: Math.floor(Number(i?.qty ?? i?.q ?? 0)),
-    }))
-    .filter((i) => i.desc && i.qty > 0);
-
-  if (!clean.length) throw new Error('Aucun article');
-
-  for (const it of clean) {
-    if (!PRICE_LIST[it.desc]) throw new Error(`Produit invalide: ${it.desc}`);
-    if (it.qty < CONFIG.VALIDATION.MIN_QUANTITY || it.qty > CONFIG.VALIDATION.MAX_QUANTITY) {
-      throw new Error(`Quantité invalide: ${it.qty}`);
+  if (discountActivated) {
+    if (enterpriseName && enterprises[enterpriseName]) {
+      discountPct = Number(enterprises[enterpriseName].discount || 0);
+      discountType = 'Entreprise';
+    } else {
+      discountPct = Number(employeeDiscountPct || 0);
+      discountType = 'Employé';
     }
   }
-  return clean;
+
+  const discountAmount = +(subtotal * (discountPct / 100)).toFixed(2);
+  const total = +(subtotal - discountAmount).toFixed(2);
+
+  return { subtotal, discountPct, discountAmount, total, discountType };
 }
 
-function getEmployeeRole(meta, name) {
-  return meta.employeeDiscounts?.[name]?.role || '';
-}
-function getEmployeeDiscount(meta, name) {
-  return Number(meta.employeeDiscounts?.[name]?.discount || 0) || 0;
-}
-function getFixedEnterpriseDiscount(ent) {
-  return Number(ENTERPRISES_FALLBACK?.[ent]?.discount || 0) || 0;
-}
-
-function getWebhookForHRType(type) {
-  const map = {
-    recrutement: WEBHOOKS.RECRUTEMENT,
-    convocation: WEBHOOKS.CONVOCATION,
-    avertissement: WEBHOOKS.AVERTISSEMENT,
-    licenciement: WEBHOOKS.LICENCIEMENT,
-    demission: WEBHOOKS.DEMISSION,
-    depense: WEBHOOKS.DEPENSE,
-  };
-  return map[type];
-}
-
-/**
- * =========================================================
- *  API POST
- * =========================================================
- */
-export async function POST(request) {
+// =====================
+// API
+// =====================
+export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const action = body?.action || 'getMeta';
     const data = body?.data || {};
 
-    // --- META ---
+    const sheets = await getAuthSheets();
+
+    // META
     if (action === 'getMeta') {
-      const meta = await getMetaInternal();
+      const meta = await buildMeta(sheets);
       return NextResponse.json({ success: true, ...meta });
     }
 
-    const meta = await getMetaInternal();
-    const spreadsheetId = cleanEnv(process.env.GOOGLE_SHEET_ID);
+    // Pour les actions métier, on charge meta (prix, enterprises, discounts, etc.)
+    const meta = await buildMeta(sheets);
 
-    // --- FACTURES ---
+    // =====================
+    // sendFactures
+    // =====================
     if (action === 'sendFactures') {
-      checkRateLimit('fact_' + String(data?.employee || 'x'));
-
-      validateEmployee(meta, data.employee);
-      const invoiceNumber = validateInvoiceNumber(data.invoiceNumber);
-
-      const items = validateItems(data.items);
-
-      const grandTotalBefore = items.reduce((s, it) => s + it.qty * Number(PRICE_LIST[it.desc] || 0), 0);
-
+      const employee = String(data.employee || '').trim();
+      const invoiceNumber = String(data.invoiceNumber || '').trim();
       const enterprise = String(data.enterprise || '').trim();
-      const discountActivated = Boolean(data.discountActivated);
+      const customerName = String(data.customerName || '').trim();
+      const employeeCard = toBool(data.employeeCard);
+      const discountActivated = toBool(data.discountActivated);
 
-      let discountPct = 0;
-      let discountType = 'Aucune';
+      if (!employee || !meta.employees.includes(employee)) {
+        return NextResponse.json({ success: false, error: 'Employé invalide' }, { status: 400 });
+      }
+      if (!invoiceNumber || invoiceNumber.length < 3 || invoiceNumber.length > 20) {
+        return NextResponse.json({ success: false, error: 'Numéro facture invalide' }, { status: 400 });
+      }
 
-      if (discountActivated) {
-        if (enterprise) {
-          discountPct = getFixedEnterpriseDiscount(enterprise);
-          discountType = 'Entreprise';
-        } else {
-          discountPct = getEmployeeDiscount(meta, data.employee);
-          discountType = 'Employé';
+      const rawItems = Array.isArray(data.items) ? data.items : [];
+      const items = rawItems
+        .map((i: any) => ({ desc: String(i.desc ?? i.name ?? '').trim(), qty: Math.floor(Number(i.qty ?? i.q ?? 0)) }))
+        .filter((i) => i.desc && i.qty > 0);
+
+      if (items.length === 0) {
+        return NextResponse.json({ success: false, error: 'Aucun article' }, { status: 400 });
+      }
+
+      // validate products
+      for (const it of items) {
+        if (!(it.desc in meta.prices)) {
+          return NextResponse.json({ success: false, error: `Produit invalide: ${it.desc}` }, { status: 400 });
         }
       }
 
-      const discountAmount = Number((grandTotalBefore * (discountPct / 100)).toFixed(2));
-      const grandTotalAfter = Number((grandTotalBefore - discountAmount).toFixed(2));
+      const employeeDiscountPct = meta.employeeDiscounts?.[employee]?.discount ?? 0;
 
-      // --- Discord Facturation ---
-      const embed = {
-        title: `🧾 Facture N°${invoiceNumber}`,
-        description: `**Nouvelle facture générée - Esthétique Vespucci**`,
-        color: 0x0000ff,
-        fields: [
-          {
-            name: '📋 Informations Générales',
-            value: [
-              `**Employé:** ${data.employee}`,
-              `**Rôle:** ${getEmployeeRole(meta, data.employee) || '—'}`,
-              `**Entreprise:** ${enterprise || '—'}`,
-              `**Client:** ${String(data.customerName || '—')}`,
-              `**Carte employé:** ${data.employeeCard ? 'Oui' : 'Non'}`,
-            ].join('\n'),
-            inline: false,
-          },
-          {
-            name: '💰 Détails Financiers',
-            value: [
-              `**Sous-total:** ${formatAmount(grandTotalBefore)}`,
-              `**Réduction:** ${discountPct}% (${formatAmount(discountAmount)})`,
-              `**Type réduction:** ${discountType}`,
-              `**Total final:** ${formatAmount(grandTotalAfter)}`,
-            ].join('\n'),
-            inline: false,
-          },
-          {
-            name: '📜 Service effectué',
-            value:
-              items
-                .map((it) => `• ${it.desc} ×${it.qty} - ${formatAmount(PRICE_LIST[it.desc] || 0)}`)
-                .join('\n') || 'Aucun article',
-            inline: false,
-          },
-        ],
-        footer: { text: `Esthétique Vespucci - Facturation • ${new Date().toLocaleDateString('fr-FR')}` },
-        timestamp: new Date().toISOString(),
-      };
-
-      const discordSent = await postToDiscordWebhook(WEBHOOKS.FACTURATION, {
-        username: 'Secretaire Vespucci',
-        avatar_url: 'https://i.goopics.net/3qa2y2.png',
-        embeds: [embed],
+      const totals = calcInvoiceTotals({
+        items,
+        prices: meta.prices,
+        discountActivated,
+        enterpriseName: enterprise,
+        enterprises: meta.enterprises,
+        employeeDiscountPct,
       });
 
-      // --- Sheets Factures ---
-      let sheetsSaved = false;
-      if (spreadsheetId && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_CLIENT_EMAIL) {
-        const sheets = await getAuthSheets();
+      const now = new Date();
+      const role = meta.employeeDiscounts?.[employee]?.role || '';
+      const itemsDetails = items.map((i) => `${i.desc} (×${i.qty})`).join('; ');
 
-        // assure l’onglet + headers
-        await ensureSheetWithHeaders(sheets, spreadsheetId, SHEET_NAMES.FACTURES, [
-          'Date',
-          'Employé',
-          'Rôle',
-          'N° Facture',
-          'Entreprise',
-          'Client',
-          'Carte Employé',
-          'Type Remise',
-          '% Remise',
-          'Sous-total',
-          'Montant Remise',
-          'Total',
-          'Nb Articles',
-          'Détails Articles',
-          'Horodatage',
-        ]);
+      // Ensure headers Factures
+      await ensureHeadersIfEmpty(sheets, 'Factures', [
+        'Date','Employé','Rôle','N° Facture','Entreprise','Client','Carte Employé','Type Remise','% Remise',
+        'Sous-total','Montant Remise','Total','Nb Articles','Détails Articles','Horodatage'
+      ]);
 
-        const now = new Date();
-        const itemsDetails = items.map((it) => `${it.desc} (×${it.qty})`).join('; ');
+      // Append Factures
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SHEET_ID,
+        range: `'Factures'!A:O`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: {
+          values: [[
+            todayFR(),
+            employee,
+            role,
+            invoiceNumber,
+            enterprise || '',
+            customerName || '',
+            employeeCard ? 'Oui' : 'Non',
+            totals.discountType,
+            totals.discountPct,
+            totals.subtotal,
+            totals.discountAmount,
+            totals.total,
+            items.length,
+            itemsDetails,
+            isoNow(),
+          ]]
+        }
+      });
 
-        await sheets.spreadsheets.values.append({
-          spreadsheetId,
-          range: `'${SHEET_NAMES.FACTURES}'!A:O`,
-          valueInputOption: 'USER_ENTERED',
-          requestBody: {
-            values: [
-              [
-                now.toLocaleDateString('fr-FR'),
-                data.employee,
-                getEmployeeRole(meta, data.employee) || '',
-                invoiceNumber,
-                enterprise || '',
-                String(data.customerName || ''),
-                data.employeeCard ? 'Oui' : 'Non',
-                discountType,
-                discountPct,
-                grandTotalBefore,
-                discountAmount,
-                grandTotalAfter,
-                items.length,
-                itemsDetails,
-                now.toISOString(),
-              ],
-            ],
-          },
-        });
-
-        sheetsSaved = true;
-      }
+      // Discord embed (FACTURATION)
+      await sendDiscordWebhook(WEBHOOKS.FACTURATION, {
+        username: meta.ui?.discordUsername || 'Secretaire Vespucci',
+        avatar_url: meta.ui?.discordAvatarUrl || undefined,
+        embeds: [{
+          title: `🧾 Facture N°${invoiceNumber}`,
+          description: `**Nouvelle facture générée - Esthétique Vespucci**`,
+          color: 0x0000ff,
+          fields: [
+            {
+              name: '📋 Informations Générales',
+              value: [
+                `**Employé:** ${employee}`,
+                `**Rôle:** ${role || '—'}`,
+                `**Entreprise:** ${enterprise || '—'}`,
+                `**Client:** ${customerName || '—'}`,
+                `**Carte employé:** ${employeeCard ? 'Oui' : 'Non'}`
+              ].join('\n'),
+              inline: false
+            },
+            {
+              name: '💰 Détails Financiers',
+              value: [
+                `**Sous-total:** ${meta.currencySymbol}${totals.subtotal.toFixed(2)}`,
+                `**Réduction:** ${totals.discountPct}% (${meta.currencySymbol}${totals.discountAmount.toFixed(2)})`,
+                `**Type réduction:** ${totals.discountType}`,
+                `**Total final:** ${meta.currencySymbol}${totals.total.toFixed(2)}`
+              ].join('\n'),
+              inline: false
+            },
+            {
+              name: '📜 Service effectué',
+              value: items.map(i => `• ${i.desc} ×${i.qty} - ${meta.currencySymbol}${(meta.prices[i.desc] || 0).toFixed(2)}`).join('\n'),
+              inline: false
+            }
+          ],
+          footer: { text: `Esthétique Vespucci - Facturation • ${todayFR()}` },
+          timestamp: isoNow()
+        }]
+      });
 
       return NextResponse.json({
         success: true,
-        message: `Facture N°${invoiceNumber} envoyée vers l'entreprise${sheetsSaved ? ' et sauvegardée' : ''}`,
-        subtotal: formatAmount(grandTotalBefore),
-        discountActivated,
-        discountPct: `${Number(discountPct).toFixed(2)}%`,
-        discountType,
-        discountAmount: formatAmount(discountAmount),
-        total: formatAmount(grandTotalAfter),
-        itemCount: items.length,
-        discordSent: Boolean(discordSent),
-        sheetsSaved: Boolean(sheetsSaved),
+        subtotal: totals.subtotal,
+        discountPct: totals.discountPct,
+        discountType: totals.discountType,
+        discountAmount: totals.discountAmount,
+        total: totals.total,
       });
     }
 
-    // --- RH / DEPENSE ---
+    // =====================
+    // sendHR (RH + depense)
+    // =====================
     if (action === 'sendHR') {
-      checkRateLimit('hr_' + String(data?.initiatedBy || 'x'));
-
       const type = String(data.type || '').trim().toLowerCase();
-      const employee = String(data.employee || '').trim(); // "cible" ou "montant" (depense)
+      const initiatedBy = String(data.initiatedBy || data.employee || '').trim(); // user
       const reason = String(data.reason || '').trim();
       const date = String(data.date || '').trim();
-      const initiatedBy = String(data.initiatedBy || '').trim();
       const details = String(data.details || '').trim();
 
-      if (!type || !employee || !reason || !date || !initiatedBy) {
-        throw new Error('Données incomplètes');
+      if (!type || !initiatedBy || !reason || !date) {
+        return NextResponse.json({ success: false, error: 'Données incomplètes' }, { status: 400 });
       }
 
-      const webhookUrl = getWebhookForHRType(type);
-      if (!webhookUrl) throw new Error(`Webhook manquant pour: ${type}`);
-
-      const hrConfig = {
-        recrutement: { color: 0x2ecc71, title: '➕ Recrutement', desc: 'Nouvelle embauche' },
-        convocation: { color: 0x3498db, title: '📋 Convocation', desc: 'Nouvelle convocation émise' },
-        avertissement: { color: 0xf39c12, title: '⚠️ Avertissement', desc: 'Nouvel avertissement émis' },
-        licenciement: { color: 0xe74c3c, title: '🔴 Licenciement', desc: 'Procédure de licenciement' },
-        demission: { color: 0x9b59b6, title: '📝 Démission', desc: 'Démission enregistrée' },
-        depense: { color: 0x1abc9c, title: '💸 Déclaration de Dépense', desc: 'Nouvelle dépense entreprise' },
-      };
-
-      if (!hrConfig[type]) throw new Error('Type invalide');
-
-      const isExpense = type === 'depense';
-      const mainFieldLabel = isExpense ? '💰 Montant' : '👤 Employé concerné';
-
-      // montant (depense) : accepte data.amount OU data.employee
-      const amountRaw = String(data.amount ?? employee ?? '0');
-      const amount = parseFloat(amountRaw.replace('$', '').replace(',', '.').trim()) || 0;
-
-      const mainFieldValue = isExpense ? formatAmount(amount) : employee;
-
-      const embed = {
-        title: hrConfig[type].title,
-        description: hrConfig[type].desc,
-        color: hrConfig[type].color,
-        fields: [
-          { name: mainFieldLabel, value: `**${mainFieldValue}**`, inline: true },
-          { name: '📅 Date effective', value: new Date(date).toLocaleDateString('fr-FR'), inline: true },
-          { name: '🔄 Initié par', value: initiatedBy, inline: true },
-          { name: '📝 Motif / Description', value: reason, inline: false },
-        ],
-        footer: { text: `Esthétique Vespucci - Direction` },
-        timestamp: new Date().toISOString(),
-      };
-
-      if (details) {
-        const detailsLabel = isExpense ? '🏢 Entreprise / Fournisseur' : '📋 Détails supplémentaires';
-        embed.fields.push({ name: detailsLabel, value: details, inline: false });
+      // Validate initiatedBy exists
+      if (!meta.employees.includes(initiatedBy)) {
+        return NextResponse.json({ success: false, error: 'Auteur invalide' }, { status: 400 });
       }
 
-      const discordSent = await postToDiscordWebhook(webhookUrl, {
-        username: 'Vespucci Direction',
-        avatar_url: 'https://i.goopics.net/3qa2y2.png',
-        embeds: [embed],
+      // ---- DEPENSE
+      if (type === 'depense') {
+        // montant: data.amount OR data.employee (compat avec ton Apps Script)
+        const amount = toNumber(data.amount ?? data.employee ?? 0);
+        if (amount <= 0) {
+          return NextResponse.json({ success: false, error: 'Montant invalide' }, { status: 400 });
+        }
+
+        const role = meta.employeeDiscounts?.[initiatedBy]?.role || 'Employé';
+        const idFacture = makeDepenseId();
+
+        await ensureHeadersIfEmpty(sheets, 'Calculation', [
+          'Date','Nom & Prénom','Poste','ID Facture','Entreprise','Motifs','Quantités','Montant'
+        ]);
+
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: SHEET_ID,
+          range: `'Calculation'!A:H`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values: [[
+              new Date(date).toLocaleDateString('fr-FR'),
+              initiatedBy,
+              role,
+              idFacture,
+              details || '',
+              reason,
+              1,
+              amount
+            ]]
+          }
+        });
+
+        // Discord
+        await sendDiscordWebhook(WEBHOOKS.DEPENSE, {
+          username: 'Vespucci Direction',
+          avatar_url: meta.ui?.discordAvatarUrl || undefined,
+          embeds: [{
+            title: '💸 Déclaration de Dépense',
+            description: 'Nouvelle dépense entreprise',
+            color: 0x1abc9c,
+            fields: [
+              { name: '💰 Montant', value: `**${meta.currencySymbol}${amount.toFixed(2)}**`, inline: true },
+              { name: '📅 Date effective', value: new Date(date).toLocaleDateString('fr-FR'), inline: true },
+              { name: '🔄 Initié par', value: initiatedBy, inline: true },
+              { name: '📝 Motif / Description', value: reason, inline: false },
+              ...(details ? [{ name: '🏢 Entreprise / Fournisseur', value: details, inline: false }] : [])
+            ],
+            footer: { text: `Esthétique Vespucci - Direction` },
+            timestamp: isoNow()
+          }]
+        });
+
+        return NextResponse.json({ success: true });
+      }
+
+      // ---- RH CLASSIQUE
+      const employeeTarget = String(data.employeeTarget || data.employee || '').trim();
+      if (!employeeTarget) {
+        return NextResponse.json({ success: false, error: 'Employé concerné manquant' }, { status: 400 });
+      }
+
+      await ensureHeadersIfEmpty(sheets, 'RH', [
+        'Date','Type Action','Employé','Motif','Date Effective','Détails','Initié par','Horodatage'
+      ]);
+
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SHEET_ID,
+        range: `'RH'!A:H`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: {
+          values: [[
+            todayFR(),
+            type,
+            employeeTarget,
+            reason,
+            new Date(date).toLocaleDateString('fr-FR'),
+            details || '',
+            initiatedBy,
+            isoNow()
+          ]]
+        }
       });
 
-      // --- Sheets RH / Calculation ---
-      let sheetSaved = false;
-      if (spreadsheetId && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_CLIENT_EMAIL) {
-        const sheets = await getAuthSheets();
-        const now = new Date();
+      // Discord webhook par type
+      const webhookMap: Record<string, string | undefined> = {
+        recrutement: WEBHOOKS.RECRUTEMENT,
+        convocation: WEBHOOKS.CONVOCATION,
+        avertissement: WEBHOOKS.AVERTISSEMENT,
+        licenciement: WEBHOOKS.LICENCIEMENT,
+        demission: WEBHOOKS.DEMISSION,
+      };
 
-        if (isExpense) {
-          await ensureSheetWithHeaders(sheets, spreadsheetId, SHEET_NAMES.CALCULATION, [
-            'Date',
-            'Nom & Prénom',
-            'Poste',
-            'ID Facture',
-            'Entreprise',
-            'Motifs',
-            'Quantités',
-            'Montant',
-          ]);
+      const titles: Record<string, { title: string; color: number; desc: string }> = {
+        recrutement: { title: '➕ Recrutement', color: 0x2ecc71, desc: 'Nouvelle embauche' },
+        convocation: { title: '📋 Convocation', color: 0x3498db, desc: 'Nouvelle convocation émise' },
+        avertissement: { title: '⚠️ Avertissement', color: 0xf39c12, desc: 'Nouvel avertissement émis' },
+        licenciement: { title: '🔴 Licenciement', color: 0xe74c3c, desc: 'Procédure de licenciement' },
+        demission: { title: '📝 Démission', color: 0x9b59b6, desc: 'Démission enregistrée' },
+      };
 
-          const timestamp = Math.floor(Date.now() / 1000);
-          const idFacture = `DEP-${String(timestamp).slice(-6)}`;
+      const t = titles[type] || { title: `Action RH`, color: 0x777777, desc: 'Action RH' };
+      const wh = webhookMap[type];
 
-          const role = getEmployeeRole(meta, initiatedBy) || 'Employé';
-          const entrepriseCible = details || 'Non spécifié';
+      await sendDiscordWebhook(wh, {
+        username: 'Vespucci Direction',
+        avatar_url: meta.ui?.discordAvatarUrl || undefined,
+        embeds: [{
+          title: t.title,
+          description: t.desc,
+          color: t.color,
+          fields: [
+            { name: '👤 Employé concerné', value: `**${employeeTarget}**`, inline: true },
+            { name: '📅 Date effective', value: new Date(date).toLocaleDateString('fr-FR'), inline: true },
+            { name: '🔄 Initié par', value: initiatedBy, inline: true },
+            { name: '📝 Motif / Description', value: reason, inline: false },
+            ...(details ? [{ name: '📋 Détails supplémentaires', value: details, inline: false }] : [])
+          ],
+          footer: { text: `Esthétique Vespucci - Direction` },
+          timestamp: isoNow()
+        }]
+      });
 
-          await sheets.spreadsheets.values.append({
-            spreadsheetId,
-            range: `'${SHEET_NAMES.CALCULATION}'!A:H`,
-            valueInputOption: 'USER_ENTERED',
-            requestBody: {
-              values: [
-                [
-                  new Date(date).toLocaleDateString('fr-FR'),
-                  initiatedBy,
-                  role,
-                  idFacture,
-                  entrepriseCible,
-                  reason,
-                  1,
-                  amount,
-                ],
-              ],
-            },
-          });
-
-          sheetSaved = true;
-        } else {
-          await ensureSheetWithHeaders(sheets, spreadsheetId, SHEET_NAMES.RH, [
-            'Date',
-            'Type Action',
-            'Employé',
-            'Motif',
-            'Date Effective',
-            'Détails',
-            'Initié par',
-            'Horodatage',
-          ]);
-
-          await sheets.spreadsheets.values.append({
-            spreadsheetId,
-            range: `'${SHEET_NAMES.RH}'!A:H`,
-            valueInputOption: 'USER_ENTERED',
-            requestBody: {
-              values: [
-                [
-                  now.toLocaleDateString('fr-FR'),
-                  type,
-                  employee,
-                  reason,
-                  new Date(date).toLocaleDateString('fr-FR'),
-                  details || '',
-                  initiatedBy,
-                  now.toISOString(),
-                ],
-              ],
-            },
-          });
-
-          sheetSaved = true;
-        }
-      }
-
-      return NextResponse.json({ success: true, discordSent: Boolean(discordSent), sheetSaved: Boolean(sheetSaved) });
+      return NextResponse.json({ success: true });
     }
 
     return NextResponse.json({ success: false, error: 'Action inconnue' }, { status: 400 });
-  } catch (err) {
-    return NextResponse.json(
-      { success: false, error: err?.message || String(err) },
-      { status: 500 }
-    );
+  } catch (err: any) {
+    console.error('API error:', err?.message || err);
+    return NextResponse.json({ success: false, error: err?.message || String(err) }, { status: 500 });
   }
 }
