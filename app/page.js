@@ -1,514 +1,467 @@
-
 'use client';
-import { useState, useEffect, useRef } from 'react';
-import Head from 'next/head';
+import { useState, useEffect, useMemo } from 'react';
 
 // --- CONFIGURATION DATA ---
-const CONFIG = {
-  companyName: "Vespucci",
-  subTitle: "Titanium Edition",
-  currency: "$",
-  default_employees: ["Soren Bloom", "Julio Alvarez", "Sun Price", "Andres Hernandez", "Taziñio Jimenez"],
-  webhooks: {
-    // Remplace par tes vrais webhooks Discord
-    facture: "URL_WEBHOOK_FACTURE",
-    rh: "URL_WEBHOOK_RH", 
-    expense: "URL_WEBHOOK_DEPENSE"
-  }
+const WEBHOOKS = {
+  factures: "VOTRE_WEBHOOK_FACTURES",
+  direction: "VOTRE_WEBHOOK_DIRECTION",
+  recrutement: "VOTRE_WEBHOOK_RECRUTEMENT",
+  convocation: "VOTRE_WEBHOOK_CONVOCATION",
+  avertissement: "VOTRE_WEBHOOK_AVERTISSEMENT",
+  licenciement: "VOTRE_WEBHOOK_LICENCIEMENT", 
+  depense: "https://discord.com/api/webhooks/1458467290151653563/SGEnsRQJ2KDDnhUoCRmGp0IRM96o65gP-HVhWrxTzrDef02aS3SwtQKM2WG6iVKE43fs"
 };
 
-const MODULES = [
-  { id: 'dashboard', label: 'Dashboard', icon: 'ri-dashboard-3-fill' },
-  { id: 'caisse', label: 'Terminal Vente', icon: 'ri-shopping-cart-2-fill' },
-  { id: 'admin', label: 'Administration', icon: 'ri-shield-user-fill' },
-  { id: 'annuaire', label: 'Annuaire', icon: 'ri-contacts-book-2-fill' },
-  { id: 'expenses', label: 'Frais', icon: 'ri-money-dollar-circle-fill' }
+const EMPLOYEES_LIST = [
+  "Alvarez Julio", "Bloom Soren", "Price Sun", "Hernandez Andres", 
+  "Mason Bloom", "Jimenez Taziñio", "Rosales Kali", "Daikii Isuke", 
+  "Makara Chariya Chan", "Price Moon", "Jayden Lockett", "Jayden Coleman", 
+  "Moon Veda", "Inaya Kinslow", "Elijah Gonzalez", "Kilyan Smith", 
+  "Obito Valeria", "Lily Summer"
 ];
 
-// Catalogue Produits (Structure "Hen House" mais Design Vespucci)
-const PRODUCTS = {
-  'Tête': [
-    { name: 'Petit Tatouage', price: 350 }, { name: 'Moyen Tatouage', price: 450 },
-    { name: 'Grand Tatouage', price: 600 }, { name: 'Tatouage Visage', price: 700 }
-  ],
-  'Torse/Dos': [
-    { name: 'Petit Torse', price: 600 }, { name: 'Moyen Torse', price: 800 },
-    { name: 'Grand Torse', price: 1100 }, { name: 'Dos Complet', price: 3000 }
-  ],
-  'Bras': [
-    { name: 'Petit Bras', price: 450 }, { name: 'Moyen Bras', price: 600 },
-    { name: 'Bras Complet', price: 2500 }
-  ],
-  'Jambes': [
-    { name: 'Petit Jambe', price: 450 }, { name: 'Jambe Complète', price: 2500 }
-  ],
-  'Coiffure': [
-    { name: 'Coupe Homme', price: 200 }, { name: 'Coupe Femme', price: 200 },
-    { name: 'Barbe', price: 100 }, { name: 'Coloration', price: 150 }
-  ],
-  'Laser': [
-    { name: 'Séance Laser', price: 500 }, { name: 'Détatouage', price: 1000 }
-  ]
-};
+const PRODUCTS = [
+  { id: 'Tête', icon: 'ri-user-3-fill', color: '#06b6d4', items: [{n:'Petit Tatouage', p:350}, {n:'Moyen Tatouage', p:450}, {n:'Grand Tatouage', p:600}, {n:'Tatouage Visage', p:700}] },
+  { id: 'Torse/Dos', icon: 'ri-body-scan-fill', color: '#f59e0b', items: [{n:'Petit Tatouage', p:600}, {n:'Moyen Tatouage', p:800}, {n:'Grand Tatouage', p:1100}, {n:'Dos Complet', p:3000}] },
+  { id: 'Bras', icon: 'ri-markup-fill', color: '#8b5cf6', items: [{n:'Petit Tatouage', p:450}, {n:'Moyen Tatouage', p:600}, {n:'Grand Tatouage', p:800}, {n:'Bras Complet', p:2500}] },
+  { id: 'Jambes', icon: 'ri-walk-fill', color: '#10b981', items: [{n:'Petit Tatouage', p:450}, {n:'Moyen Tatouage', p:600}, {n:'Grand Tatouage', p:800}, {n:'Jambe Complète', p:2500}] },
+  { id: 'Custom', icon: 'ri-edit-2-fill', color: '#94a3b8', items: [{n:'Retouche', p:100}, {n:'Custom Small', p:500}, {n:'Custom Large', p:1500}, {n:'Projet Spécial', p:5000}] },
+  { id: 'Laser', icon: 'ri-flashlight-fill', color: '#ef4444', items: [{n:'Petit Laser', p:250}, {n:'Moyen Laser', p:500}, {n:'Grand Laser', p:750}, {n:'Séance Complète', p:1000}] },
+  { id: 'Coiffeur', icon: 'ri-scissors-fill', color: '#ec4899', items: [{n:'Coupe', p:200}, {n:'Couleur', p:100}, {n:'Barbe', p:100}, {n:'Dégradé', p:100}] }
+];
 
-export default function VespucciManager() {
-  // --- STATE MANAGEMENT ---
-  const [view, setView] = useState('login'); // login | app
+const PARTNERS = [
+  {name:'HenHouse', val:30, img:'https://i.goopics.net/xvvwd2.png', phone:'555-0192'},
+  {name:'Auto Exotic', val:30, img:'https://i.goopics.net/jqrtnn.png', phone:'555-1029'},
+  {name:'LifeInvader', val:30, img:'https://i.goopics.net/k7g19i.png', phone:'555-3920'},
+  {name:'Delight', val:30, img:'https://i.goopics.net/1yiiit.png', phone:'555-8821'},
+  {name:'LTD Sandy', val:30, img:'https://i.goopics.net/4x8au4.png', phone:'555-6672'},
+  {name:'Biogood', val:30, img:'https://i.goopics.net/3y6ljf.png', phone:'397-3784'},
+];
+
+const DEFAULT_DIRECTORY = [
+  { nom: "Bloom", prenom: "Soren", grade: "Co-Patron", tel: "575-5535", photo: "https://i.goopics.net/o6gnq3.png" }
+];
+
+export default function Home() {
+  const [view, setView] = useState('login'); // login, dashboard, invoice, direction, annuaire
   const [user, setUser] = useState('');
-  const [currentTab, setCurrentTab] = useState('dashboard');
-  const [cart, setCart] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [currentTime, setCurrentTime] = useState('');
+  const [clock, setClock] = useState('00:00');
   
-  // Caisse State
-  const [activeCategory, setActiveCategory] = useState('Tête');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [invoiceForm, setInvoiceForm] = useState({ client: '', discount: 0, invoiceNumber: '' });
+  // States Caisse
+  const [cart, setCart] = useState([]);
+  const [openCat, setOpenCat] = useState(null); // Index de la catégorie ouverte
+  const [searchQuery, setSearchQuery] = useState('');
+  const [invoiceDetails, setInvoiceDetails] = useState({ client: '', discount: 0, id: '' });
 
-  // Admin State
-  const [pin, setPin] = useState('');
-  const [adminUnlocked, setAdminUnlocked] = useState(false);
-  const [hrForm, setHrForm] = useState({ type: 'recrutement', target: '', reason: '' });
+  // States Admin
+  const [adminPin, setAdminPin] = useState('');
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [modalHR, setModalHR] = useState({ show: false, type: '' });
+  const [hrForm, setHrForm] = useState({ target: '', date: '', reason: '' });
+
+  // States Annuaire
+  const [contacts, setContacts] = useState([]);
+  const [modalAddContact, setModalAddContact] = useState(false);
+  const [newContact, setNewContact] = useState({ nom: '', prenom: '', grade: 'Employé', tel: '', photo: '' });
+  const [modalContact, setModalContact] = useState(null); // Contact objet ou null
 
   // Init
   useEffect(() => {
-    // Horloge
-    const timer = setInterval(() => setCurrentTime(new Date().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})), 1000);
-    // Invoice ID generator
-    setInvoiceForm(prev => ({ ...prev, invoiceNumber: 'INV-' + Math.floor(100000 + Math.random() * 900000) }));
+    // Clock
+    const timer = setInterval(() => setClock(new Date().toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})), 1000);
+    // Invoice ID
+    setInvoiceDetails(prev => ({ ...prev, id: 'INV-' + Math.floor(Math.random() * 1000000) }));
+    // Load contacts
+    const savedContacts = localStorage.getItem('vespucci_contacts');
+    if (savedContacts) setContacts(JSON.parse(savedContacts));
+    else setContacts(DEFAULT_DIRECTORY);
+
     return () => clearInterval(timer);
   }, []);
 
-  // --- AUDIO ---
-  const playSound = (type) => {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
-      const now = ctx.currentTime;
-      if (type === 'click') {
-        osc.frequency.setValueAtTime(600, now);
-        gain.gain.setValueAtTime(0.05, now);
-        osc.stop(now + 0.05);
-      } else if (type === 'success') {
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(440, now);
-        osc.frequency.linearRampToValueAtTime(880, now + 0.1);
-        gain.gain.setValueAtTime(0.05, now);
-        osc.stop(now + 0.2);
-      }
-      osc.start(now);
-    } catch(e) {}
-  };
-
   // --- LOGIC CAISSE ---
+  const toggleCat = (idx) => setOpenCat(openCat === idx ? null : idx);
+
   const addToCart = (item) => {
-    playSound('click');
     setCart(prev => {
-      const exist = prev.find(i => i.name === item.name);
-      if (exist) return prev.map(i => i.name === item.name ? { ...i, qty: i.qty + 1 } : i);
-      return [...prev, { ...item, qty: 1 }];
+      const exist = prev.find(x => x.n === item.n);
+      if(exist) return prev.map(x => x.n === item.n ? {...x, q: x.q + 1} : x);
+      return [...prev, {...item, q: 1}];
     });
   };
 
-  const updateQty = (index, delta) => {
-    const newCart = [...cart];
-    newCart[index].qty += delta;
-    if (newCart[index].qty <= 0) newCart.splice(index, 1);
-    setCart(newCart);
+  const modQty = (idx, amount) => {
+    setCart(prev => {
+      const newCart = [...prev];
+      newCart[idx].q += amount;
+      if(newCart[idx].q <= 0) newCart.splice(idx, 1);
+      return newCart;
+    });
   };
 
   const calculateTotal = () => {
-    const sub = cart.reduce((acc, i) => acc + (i.price * i.qty), 0);
-    const discAmt = (sub * (invoiceForm.discount / 100));
+    const sub = cart.reduce((a, b) => a + (b.p * b.q), 0);
+    const discAmt = sub * (invoiceDetails.discount / 100);
     return { sub, discAmt, total: sub - discAmt };
   };
 
-  const handleSendInvoice = async () => {
-    if (cart.length === 0) return alert("Panier vide !");
-    setLoading(true);
-    playSound('success');
+  const submitInvoice = async () => {
+    if(cart.length === 0) return alert("Panier vide");
+    const totals = calculateTotal();
     
-    // Simulation API
-    await new Promise(r => setTimeout(r, 1000));
-    
-    // Webhook Logic would go here using fetch()
-    
-    setLoading(false);
-    alert(`Facture de ${calculateTotal().total}$ encaissée !`);
+    const embed = {
+      title: "🧾 Facture Validée",
+      color: 3447003,
+      footer: { text: "Vespucci • Titanium Edition" },
+      timestamp: new Date(),
+      fields: [
+        {name:"Vendeur", value: user, inline:true},
+        {name:"Client", value: invoiceDetails.client || "Inconnu", inline:true},
+        {name:"Total Payé", value: `**${totals.total.toFixed(0)} $**`, inline:true},
+        {name:"Détails", value: cart.map(i=>`• ${i.n} (x${i.q})`).join('\n')}
+      ]
+    };
+
+    await fetch(WEBHOOKS.factures, {
+      method: "POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({embeds:[embed]})
+    });
+
     setCart([]);
-    setInvoiceForm(p => ({...p, client:'', invoiceNumber: 'INV-' + Math.floor(Math.random()*900000)}));
+    setInvoiceDetails(prev => ({ ...prev, client: '', id: 'INV-' + Math.floor(Math.random() * 1000000) }));
+    alert("Facture envoyée !");
+  };
+
+  // --- LOGIC RH ---
+  const sendHR = async (e) => {
+    e.preventDefault();
+    const type = modalHR.type;
+    const embed = { 
+        title: "Action RH: "+type.toUpperCase(), 
+        color: type === 'licenciement' ? 15548997 : 3447003,
+        fields: [
+        {name:"Auteur", value: user, inline:true},
+        {name:"Cible/Montant", value: hrForm.target, inline:true},
+        {name:"Date Effet", value: hrForm.date, inline:true},
+        {name:"Détails", value: hrForm.reason}
+    ]};
+    
+    await fetch(WEBHOOKS[type] || WEBHOOKS.direction, {
+        method: "POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({embeds:[embed]})
+    });
+    setModalHR({ show: false, type: '' });
+    setHrForm({ target: '', date: '', reason: '' });
+    alert("Dossier transmis");
+  };
+
+  // --- LOGIC CONTACTS ---
+  const saveContact = (e) => {
+    e.preventDefault();
+    const newList = [...contacts, newContact];
+    setContacts(newList);
+    localStorage.setItem('vespucci_contacts', JSON.stringify(newList));
+    setModalAddContact(false);
+    setNewContact({ nom: '', prenom: '', grade: 'Employé', tel: '', photo: '' });
   };
 
   // --- RENDER ---
-  return (
-    <>
-      <Head>
-         {/* Import Remix Icon pour que les icones fonctionnent */}
-        <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-      </Head>
-
-      <style jsx global>{`
-        /* ====== ESTHÉTIQUE TITANIUM (Base fournie) ====== */
-        :root {
-          --primary: #06b6d4;
-          --primary-glow: rgba(6, 182, 212, 0.5);
-          --primary-dim: rgba(6, 182, 212, 0.1);
-          --accent: #8b5cf6;
-          --bg-deep: #0f0f1a;
-          --bg-panel: rgba(20, 25, 45, 0.75);
-          --glass-border: rgba(255, 255, 255, 0.08);
-          --text: #f1f5f9;
-          --text-muted: #94a3b8;
-          --font-ui: 'Inter', sans-serif;
-          --font-data: 'JetBrains Mono', monospace;
-        }
-
-        * { box-sizing: border-box; outline: none; }
-        
-        body {
-          margin: 0; padding: 0;
-          font-family: var(--font-ui);
-          background-color: var(--bg-deep);
-          color: var(--text);
-          height: 100vh; overflow: hidden;
-        }
-
-        /* FOND GRILLE */
-        .bg-grid {
-          position: fixed; inset: 0; z-index: -1;
-          background: 
-            radial-gradient(circle at 50% 10%, #1e1e3f 0%, #05050a 100%),
-            linear-gradient(45deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-            linear-gradient(-45deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-          background-size: 100% 100%, 40px 40px, 40px 40px;
-        }
-
-        /* CLASSES UTILITAIRES & COMPOSANTS */
-        .glass-panel {
-          background: var(--bg-panel);
-          backdrop-filter: blur(20px);
-          border: 1px solid var(--glass-border);
-          border-radius: 16px;
-        }
-
-        .btn {
-          padding: 12px 20px; border-radius: 10px; border: none; font-weight: 600;
-          cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
-          transition: 0.3s; font-size: 0.9rem;
-        }
-        .btn-primary {
-          background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
-          color: white; box-shadow: 0 4px 15px var(--primary-dim);
-        }
-        .btn-primary:hover { box-shadow: 0 0 20px var(--primary-glow); transform: translateY(-2px); }
-        .btn-ghost { background: rgba(255,255,255,0.05); color: var(--text); }
-        .btn-ghost:hover { background: rgba(255,255,255,0.1); }
-        
-        .btn-icon { width: 36px; height: 36px; padding: 0; border-radius: 8px; }
-
-        .input {
-          width: 100%; padding: 12px 15px; border-radius: 10px;
-          background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border);
-          color: white; font-family: var(--font-ui); transition: 0.3s;
-        }
-        .input:focus { border-color: var(--primary); background: rgba(0,0,0,0.6); }
-
-        /* SCROLLBAR */
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-
-        /* ANIMATIONS */
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .anim-enter { animation: fadeIn 0.4s ease-out forwards; }
-      `}</style>
-
-      {/* --- BACKGROUND --- */}
-      <div className="bg-grid"></div>
-
-      {/* --- VIEW: LOGIN --- */}
-      {view === 'login' && (
-        <div style={{height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background:'black'}}>
-          <div className="glass-panel anim-enter" style={{width: 400, padding: 40, textAlign: 'center', borderColor: 'var(--primary-dim)'}}>
-            <div style={{fontSize: '3rem', color: 'var(--primary)', marginBottom: 20, filter: 'drop-shadow(0 0 15px var(--primary))'}}>
-              <i className="ri-vip-diamond-fill"></i>
-            </div>
-            <h1 style={{fontSize: '2rem', margin: '0 0 10px 0', letterSpacing: '-1px'}}>VESPUCCI</h1>
-            <p style={{color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 3, fontSize: '0.8rem', marginBottom: 40}}>Titanium OS Access</p>
-            
-            <div style={{textAlign:'left', marginBottom: 20}}>
-                <label style={{fontSize:'0.75rem', color:'var(--primary)', fontWeight:700, textTransform:'uppercase'}}>Identité</label>
-                <select className="input" onChange={(e) => setUser(e.target.value)} value={user} style={{marginTop: 5}}>
-                    <option value="">Choisir employé...</option>
-                    {CONFIG.default_employees.map(e => <option key={e} value={e}>{e}</option>)}
-                </select>
-            </div>
-
-            <button className="btn btn-primary" style={{width: '100%'}} disabled={!user} onClick={() => { playSound('success'); setView('app'); }}>
-              INITIALISER SYSTÈME <i className="ri-arrow-right-line"></i>
-            </button>
-          </div>
+  if (view === 'login') return (
+    <div className="login-gate">
+      <div className="card" style={{width: 400, textAlign: 'center', borderColor: 'rgba(6,182,212,0.3)', boxShadow:'0 0 60px -20px var(--primary-glow)'}}>
+        <div style={{fontSize:'3rem', marginBottom:20, color:'white', filter:'drop-shadow(0 0 15px var(--primary-glow))'}}>
+            <i className="ri-vip-diamond-fill"></i>
         </div>
+        <h1 style={{fontSize:'1.8rem', fontWeight:800, marginBottom:5}}>Vespucci</h1>
+        <p style={{color:'var(--text-muted)', fontSize:'0.75rem', letterSpacing:3, textTransform:'uppercase', marginBottom:30}}>Titanium Access</p>
+        
+        <div style={{textAlign:'left', marginBottom:20}}>
+            <label style={{fontSize:'0.7rem', color:'var(--primary)', fontWeight:700, display:'block', marginBottom:8, textTransform:'uppercase'}}>Identifiant</label>
+            <select className="input" onChange={(e) => setUser(e.target.value)} value={user}>
+                <option value="">Choisir une identité...</option>
+                {EMPLOYEES_LIST.sort().map(e => <option key={e} value={e}>{e}</option>)}
+            </select>
+        </div>
+        <button className="btn btn-primary" style={{width:'100%'}} disabled={!user} onClick={() => setView('dashboard')}>
+            INITIALISER LA SESSION
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="app-container anim-enter" style={{maxWidth: 1600, margin: '0 auto', padding: 20}}>
+      
+      {/* TOPBAR */}
+      <header className="flex-sb" style={{padding:'15px 30px', marginBottom:40, background:'rgba(20,20,35,0.6)', backdropFilter:'blur(20px)', border:'1px solid var(--glass-border)', borderRadius:18, position:'sticky', top:20, zIndex:100}}>
+        <div className="flex-c" style={{gap:15, cursor:'pointer'}} onClick={() => setView('dashboard')}>
+            <div style={{width:40, height:40, background:'var(--gradient-primary)', borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', color:'white', boxShadow:'0 0 20px var(--primary-glow)'}}>
+                <i className="ri-vip-diamond-fill"></i>
+            </div>
+            <div style={{lineHeight:1.2}}>
+                <div style={{fontWeight:800, fontSize:'1.1rem'}}>VESPUCCI</div>
+                <div style={{fontSize:'0.7rem', color:'var(--text-muted)', letterSpacing:2, textTransform:'uppercase'}}>Manager v5.2</div>
+            </div>
+        </div>
+        <div className="flex-c" style={{gap:20}}>
+            {view !== 'dashboard' && <button className="btn btn-ghost" onClick={() => setView('dashboard')}><i className="ri-layout-grid-fill"></i> Dashboard</button>}
+            <div style={{textAlign:'right'}}>
+                <div style={{fontWeight:700, fontSize:'0.9rem'}}>{user}</div>
+                <div style={{fontSize:'0.7rem', color:'var(--primary)', fontWeight:800, letterSpacing:1}}>Employé</div>
+            </div>
+            <button className="btn btn-ghost btn-icon" style={{color:'var(--danger)', borderColor:'rgba(239,68,68,0.3)'}} onClick={() => setView('login')}><i className="ri-shut-down-line"></i></button>
+        </div>
+      </header>
+
+      {/* VIEW: DASHBOARD */}
+      {view === 'dashboard' && (
+        <section className="anim-enter">
+            <div className="flex-sb" style={{marginBottom:30, alignItems:'flex-end'}}>
+                <div>
+                    <h2 style={{fontSize:'2.2rem', fontWeight:800}}>Aperçu Global</h2>
+                    <p style={{color:'var(--text-muted)'}}>Terminal de gestion connecté.</p>
+                </div>
+                <div style={{fontFamily:'var(--font-data)', background:'rgba(255,255,255,0.03)', padding:'8px 16px', borderRadius:8, border:'1px solid var(--glass-border)'}}>
+                    <i className="ri-time-line" style={{color:'var(--primary)', marginRight:8}}></i>{clock}
+                </div>
+            </div>
+
+            <div className="bento-grid">
+                <div className="widget w-large" onClick={() => setView('invoice')}>
+                    <i className="ri-shopping-bag-3-fill" style={{position:'absolute', right:-20, bottom:-20, fontSize:'8rem', opacity:0.05, transform:'rotate(-15deg)'}}></i>
+                    <div>
+                        <span className="cc-role-badge" style={{background:'rgba(255,255,255,0.1)', color:'white'}}>Module Vente</span>
+                        <h3 style={{fontSize:'2.5rem', fontWeight:700, marginTop:15, fontFamily:'var(--font-data)'}}>CAISSE</h3>
+                        <p style={{color:'rgba(255,255,255,0.6)', fontSize:'0.9rem'}}>Accès au catalogue produits et facturation.</p>
+                    </div>
+                    <button className="btn btn-primary" style={{width:'fit-content', marginTop:20}}>Ouvrir <i className="ri-arrow-right-line"></i></button>
+                </div>
+
+                <div className="widget" style={{gridColumn:'span 1'}} onClick={() => setView('direction')}>
+                    <i className="ri-shield-star-fill" style={{position:'absolute', right:-20, bottom:-20, fontSize:'6rem', opacity:0.05, color:'var(--accent)'}}></i>
+                    <div style={{color:'var(--accent)', fontWeight:700, fontSize:'0.8rem'}}>ADMINISTRATION</div>
+                    <div style={{fontSize:'2.5rem', fontWeight:700, fontFamily:'var(--font-data)'}}>RH</div>
+                    <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Dossiers & Finances</div>
+                </div>
+
+                <div className="widget" style={{gridColumn:'span 1'}} onClick={() => setView('annuaire')}>
+                    <i className="ri-contacts-book-2-fill" style={{position:'absolute', right:-20, bottom:-20, fontSize:'6rem', opacity:0.05, color:'var(--success)'}}></i>
+                    <div style={{color:'var(--success)', fontWeight:700, fontSize:'0.8rem'}}>CONTACTS</div>
+                    <div style={{fontSize:'2.5rem', fontWeight:700, fontFamily:'var(--font-data)'}}>TEL</div>
+                    <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Annuaire Entreprise</div>
+                </div>
+            </div>
+        </section>
       )}
 
-      {/* --- VIEW: APP --- */}
-      {view === 'app' && (
-        <div style={{display: 'flex', height: '100vh', maxWidth: 1600, margin: '0 auto', overflow: 'hidden'}}>
-          
-          {/* SIDEBAR (DOCK STYLE) */}
-          <div className="glass-panel" style={{width: 80, margin: '20px 0 20px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '30px 0', borderRadius: 20}}>
-            <div style={{fontSize: '2rem', color: 'var(--primary)', marginBottom: 40, filter:'drop-shadow(0 0 10px var(--primary))'}}>
-                <i className="ri-vip-diamond-line"></i>
+      {/* VIEW: INVOICE (CAISSE) */}
+      {view === 'invoice' && (
+        <section className="anim-enter">
+            <div className="pos-layout">
+                {/* Catalogue */}
+                <div style={{display:'flex', flexDirection:'column', gap:20, overflow:'hidden', height:'100%'}}>
+                    <div style={{position:'relative'}}>
+                        <i className="ri-search-2-line" style={{position:'absolute', left:18, top:18, color:'var(--text-muted)'}}></i>
+                        <input className="input" placeholder="Rechercher..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{paddingLeft:50}} />
+                    </div>
+                    
+                    <div style={{overflowY:'auto', flex:1, paddingRight:8}}>
+                        {PRODUCTS.map((cat, idx) => (
+                            <div key={idx} className="pos-accordion-item" style={{display: searchQuery && !cat.items.some(i => i.n.toLowerCase().includes(searchQuery.toLowerCase())) ? 'none' : 'block'}}>
+                                <div 
+                                    className={`pos-acc-header ${openCat === idx || searchQuery ? 'active' : ''}`} 
+                                    onClick={() => toggleCat(idx)}
+                                >
+                                    <div className="flex-c" style={{gap:15, fontWeight:600, fontSize:'0.9rem'}}>
+                                        <div style={{width:32, height:32, borderRadius:8, background:`${cat.color}20`, color:cat.color, display:'flex', alignItems:'center', justifyContent:'center'}}>
+                                            <i className={cat.icon}></i>
+                                        </div>
+                                        {cat.id}
+                                    </div>
+                                    <i className={`ri-arrow-down-s-line ${openCat === idx ? 'ri-arrow-up-s-line' : ''}`}></i>
+                                </div>
+                                
+                                {(openCat === idx || searchQuery) && (
+                                    <div className="product-grid-inner">
+                                        {cat.items.filter(i => i.n.toLowerCase().includes(searchQuery.toLowerCase())).map((item, iIdx) => (
+                                            <div key={iIdx} className="product-card" onClick={() => addToCart(item)}>
+                                                <div style={{fontSize:'0.8rem', fontWeight:500, lineHeight:1.2, marginBottom:5}}>{item.n}</div>
+                                                <div style={{fontFamily:'var(--font-data)', fontSize:'0.85rem', color:'var(--primary)', fontWeight:700, background:'rgba(0,0,0,0.3)', padding:'2px 8px', borderRadius:6}}>{item.p}$</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Ticket */}
+                <div className="ticket-panel">
+                    <div style={{padding:20, borderBottom:'1px dashed var(--glass-border)', background:'rgba(255,255,255,0.02)'}}>
+                        <div className="flex-sb" style={{marginBottom:15}}>
+                            <span style={{fontWeight:700, fontSize:'0.9rem'}}><i className="ri-file-list-3-fill"></i> TICKET</span>
+                            <span style={{background:'var(--primary)', color:'white', fontWeight:700, fontSize:'0.75rem', padding:'3px 8px', borderRadius:6}}>{cart.reduce((a,b)=>a+b.q,0)}</span>
+                        </div>
+                        <div className="grid-2" style={{gap:10}}>
+                            <input className="input" placeholder="Client" value={invoiceDetails.client} onChange={e => setInvoiceDetails({...invoiceDetails, client: e.target.value})} style={{fontSize:'0.85rem'}} />
+                            <input className="input" value={invoiceDetails.id} readOnly style={{opacity:0.6, fontFamily:'var(--font-data)', textAlign:'center'}} />
+                        </div>
+                    </div>
+
+                    <div style={{flex:1, overflowY:'auto', padding:15}}>
+                        {cart.length === 0 ? (
+                             <div style={{display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', color:'var(--text-muted)', opacity:0.2}}>
+                                <i className="ri-shopping-cart-line" style={{fontSize:'3rem', marginBottom:10}}></i>
+                                <span style={{fontSize:'0.8rem'}}>Vide</span>
+                             </div>
+                        ) : (
+                            cart.map((item, idx) => (
+                                <div key={idx} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'12px 15px', marginBottom:8, borderRadius:10, background:'rgba(255,255,255,0.03)', borderLeft:'2px solid var(--glass-border)'}}>
+                                    <div>
+                                        <div style={{fontWeight:600, fontSize:'0.9rem'}}>{item.n}</div>
+                                        <div style={{fontSize:'0.75rem', color:'var(--text-muted)', fontFamily:'var(--font-data)'}}>{item.p}$ x {item.q}</div>
+                                    </div>
+                                    <div className="flex-c" style={{gap:5}}>
+                                        <button className="btn btn-ghost btn-icon" style={{width:24, height:24}} onClick={() => modQty(idx, -1)}>-</button>
+                                        <button className="btn btn-ghost btn-icon" style={{width:24, height:24, color:'var(--success)'}} onClick={() => modQty(idx, 1)}>+</button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    <div style={{background:'rgba(15,15,22,0.95)', borderTop:'1px solid var(--glass-border)', padding:25, backdropFilter:'blur(10px)'}}>
+                         <div className="flex-sb" style={{marginBottom:15}}>
+                            <select className="input" style={{padding:'6px 10px', width:'auto', fontSize:'0.8rem'}} value={invoiceDetails.discount} onChange={e => setInvoiceDetails({...invoiceDetails, discount: Number(e.target.value)})}>
+                                <option value="0">Remise (0%)</option>
+                                {PARTNERS.map(p => <option key={p.name} value={p.val}>{p.name} (-{p.val}%)</option>)}
+                            </select>
+                            <span style={{color:'var(--success)', fontFamily:'var(--font-data)'}}>-{calculateTotal().discAmt.toFixed(0)} $</span>
+                         </div>
+                         <div className="flex-sb" style={{marginBottom:15, paddingTop:15, borderTop:'1px solid rgba(255,255,255,0.1)'}}>
+                            <span style={{fontWeight:800, fontSize:'1rem'}}>TOTAL NET</span>
+                            <span style={{fontWeight:800, fontSize:'1.6rem', color:'var(--primary)'}}>{calculateTotal().total.toFixed(0)} $</span>
+                         </div>
+                         <button className="btn btn-primary" style={{width:'100%', padding:14}} onClick={submitInvoice}>ENCAISSER</button>
+                    </div>
+                </div>
             </div>
-            
-            <div style={{display:'flex', flexDirection:'column', gap: 15, width:'100%', alignItems:'center'}}>
-                {MODULES.map(mod => (
-                    <button 
-                        key={mod.id} 
-                        onClick={() => { setCurrentTab(mod.id); playSound('click'); }}
-                        className="btn"
-                        style={{
-                            width: 50, height: 50, padding: 0, 
-                            background: currentTab === mod.id ? 'rgba(6, 182, 212, 0.15)' : 'transparent',
-                            color: currentTab === mod.id ? 'var(--primary)' : 'var(--text-muted)',
-                            border: currentTab === mod.id ? '1px solid var(--primary)' : 'none'
-                        }}
-                        title={mod.label}
-                    >
-                        <i className={mod.icon} style={{fontSize: '1.4rem'}}></i>
-                    </button>
+        </section>
+      )}
+
+      {/* VIEW: DIRECTION */}
+      {view === 'direction' && (
+        <section className="anim-enter" style={{maxWidth:900, margin:'0 auto'}}>
+            {!isAdminUnlocked ? (
+                <div className="card" style={{maxWidth:450, margin:'80px auto', textAlign:'center', borderColor:'var(--danger)'}}>
+                    <div style={{width:60, height:60, background:'rgba(239,68,68,0.1)', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 20px', color:'var(--danger)', fontSize:'1.8rem'}}>
+                        <i className="ri-lock-password-fill"></i>
+                    </div>
+                    <h3>Accès Restreint</h3>
+                    <div style={{display:'flex', gap:15, marginTop:20}}>
+                        <input type="password" className="input" style={{textAlign:'center', letterSpacing:5, fontSize:'1.1rem'}} placeholder="PIN" value={adminPin} onChange={e => setAdminPin(e.target.value)} />
+                        <button className="btn btn-primary" style={{background:'var(--danger)'}} onClick={() => { if(adminPin === '123459') setIsAdminUnlocked(true); else alert('Code Faux'); }}>OK</button>
+                    </div>
+                </div>
+            ) : (
+                <>
+                    <div className="flex-sb" style={{marginBottom:30}}>
+                        <h2>Panel Direction</h2>
+                        <button className="btn btn-ghost" onClick={() => setIsAdminUnlocked(false)}>Verrouiller</button>
+                    </div>
+                    <div className="grid-3">
+                         {['Recrutement', 'Convocation', 'Avertissement', 'Licenciement'].map(type => (
+                             <div key={type} className="widget" style={{minHeight:120}} onClick={() => setModalHR({show:true, type: type.toLowerCase()})}>
+                                 <div style={{fontWeight:700, fontSize:'1.1rem'}}>{type}</div>
+                                 <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Action RH</div>
+                                 <i className="ri-folder-user-line" style={{position:'absolute', right:15, bottom:15, fontSize:'2rem', opacity:0.1}}></i>
+                             </div>
+                         ))}
+                         <div className="widget" style={{minHeight:120, borderColor:'var(--success)'}} onClick={() => setModalHR({show:true, type: 'depense'})}>
+                                 <div style={{fontWeight:700, fontSize:'1.1rem', color:'var(--success)'}}>Dépense</div>
+                                 <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Note de frais</div>
+                         </div>
+                    </div>
+                </>
+            )}
+        </section>
+      )}
+
+      {/* VIEW: ANNUAIRE */}
+      {view === 'annuaire' && (
+        <section className="anim-enter">
+            <div className="flex-sb" style={{marginBottom:30}}>
+                <h2>Répertoire</h2>
+                <button className="btn btn-success" onClick={() => setModalAddContact(true)}>Nouveau Contact</button>
+            </div>
+            <div className="grid-3">
+                {contacts.map((c, i) => (
+                    <div key={i} className="contact-card" onClick={() => setModalContact(c)}>
+                        <div style={{padding:25, textAlign:'center', display:'flex', flexDirection:'column', alignItems:'center'}}>
+                            <img src={c.photo || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} className="cc-avatar" />
+                            <div className="cc-role-badge" style={{marginBottom:10}}>{c.grade}</div>
+                            <div style={{fontWeight:700, fontSize:'1.1rem'}}>{c.prenom} {c.nom}</div>
+                        </div>
+                    </div>
                 ))}
             </div>
+        </section>
+      )}
 
-            <button className="btn btn-ghost" style={{marginTop: 'auto', color: '#ef4444'}} onClick={() => setView('login')}>
-                <i className="ri-shut-down-line" style={{fontSize: '1.4rem'}}></i>
-            </button>
-          </div>
-
-          {/* MAIN CONTENT AREA */}
-          <div style={{flex: 1, padding: '20px 30px', overflowY: 'auto', display:'flex', flexDirection:'column'}}>
-            
-            {/* TOP BAR */}
-            <div className="glass-panel" style={{padding: '15px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30, minHeight: 80}}>
-                <div>
-                    <h2 style={{margin: 0, fontSize: '1.5rem', fontWeight: 800}}>{MODULES.find(m => m.id === currentTab)?.label}</h2>
-                    <span style={{color: 'var(--text-muted)', fontSize: '0.85rem'}}>Bienvenue, {user}</span>
-                </div>
-                <div style={{textAlign: 'right'}}>
-                    <div style={{fontFamily: 'var(--font-data)', fontSize: '1.2rem', fontWeight: 700}}>{currentTime}</div>
-                    <div style={{color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase'}}>Connexion Sécurisée</div>
-                </div>
+      {/* MODALS */}
+      {modalHR.show && (
+        <div className="login-gate" style={{background:'rgba(0,0,0,0.8)', zIndex:2000}}>
+            <div className="card" style={{width:500}}>
+                <h3>RH: {modalHR.type.toUpperCase()}</h3>
+                <form onSubmit={sendHR} style={{marginTop:20}}>
+                    <input className="input" placeholder="Cible / Montant" required style={{marginBottom:15}} value={hrForm.target} onChange={e => setHrForm({...hrForm, target: e.target.value})} />
+                    <input type="date" className="input" required style={{marginBottom:15}} value={hrForm.date} onChange={e => setHrForm({...hrForm, date: e.target.value})} />
+                    <textarea className="input" rows="4" placeholder="Raison..." required style={{marginBottom:20}} value={hrForm.reason} onChange={e => setHrForm({...hrForm, reason: e.target.value})}></textarea>
+                    <div className="grid-2">
+                        <button type="button" className="btn btn-ghost" onClick={() => setModalHR({show:false, type:''})}>Annuler</button>
+                        <button type="submit" className="btn btn-primary">Envoyer</button>
+                    </div>
+                </form>
             </div>
-
-            {/* CONTENT: DASHBOARD (BENTO GRID) */}
-            {currentTab === 'dashboard' && (
-                <div className="anim-enter" style={{display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20}}>
-                    {/* Widget Caisse */}
-                    <div className="glass-panel" onClick={() => setCurrentTab('caisse')} style={{gridColumn: 'span 2', gridRow: 'span 2', padding: 30, cursor: 'pointer', position: 'relative', overflow: 'hidden', background: 'linear-gradient(135deg, rgba(6,182,212,0.1), rgba(20,25,45,0.8))'}}>
-                        <i className="ri-shopping-cart-2-fill" style={{position:'absolute', right: -20, bottom: -20, fontSize: '10rem', opacity: 0.1, transform: 'rotate(-15deg)'}}></i>
-                        <h3 style={{fontSize: '2.5rem', margin: 0}}>CAISSE</h3>
-                        <p style={{color: 'var(--text-muted)'}}>Accès rapide au terminal de vente</p>
-                        <button className="btn btn-primary" style={{marginTop: 20}}>Ouvrir <i className="ri-arrow-right-line"></i></button>
-                    </div>
-
-                    {/* Widget Staff */}
-                    <div className="glass-panel" style={{gridColumn: 'span 1', padding: 20, display:'flex', flexDirection:'column', justifyContent:'center'}}>
-                        <div style={{color: 'var(--accent)', fontWeight: 700, fontSize: '0.8rem'}}>EFFECTIF</div>
-                        <div style={{fontSize: '2rem', fontFamily: 'var(--font-data)', fontWeight: 700}}>{CONFIG.default_employees.length}</div>
-                        <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Employés actifs</div>
-                    </div>
-
-                    {/* Widget Stats */}
-                    <div className="glass-panel" style={{gridColumn: 'span 1', padding: 20, display:'flex', flexDirection:'column', justifyContent:'center'}}>
-                        <div style={{color: '#10b981', fontWeight: 700, fontSize: '0.8rem'}}>CHIFFRE AFFAIRES</div>
-                        <div style={{fontSize: '2rem', fontFamily: 'var(--font-data)', fontWeight: 700}}>-- $</div>
-                        <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Session en cours</div>
-                    </div>
-
-                    {/* Widget Admin */}
-                    <div className="glass-panel" onClick={() => setCurrentTab('admin')} style={{gridColumn: 'span 2', padding: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 20}}>
-                         <div style={{width: 50, height: 50, background: 'rgba(239, 68, 68, 0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444', fontSize: '1.5rem'}}>
-                            <i className="ri-lock-2-fill"></i>
-                         </div>
-                         <div>
-                             <div style={{fontWeight: 700}}>Administration</div>
-                             <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Accès direction requis</div>
-                         </div>
-                    </div>
-                </div>
-            )}
-
-            {/* CONTENT: CAISSE (LAYOUT HEN HOUSE / DESIGN TITANIUM) */}
-            {currentTab === 'caisse' && (
-                <div className="anim-enter" style={{display: 'flex', gap: 20, height: 'calc(100vh - 180px)'}}>
-                    
-                    {/* Colonne Gauche: Catégories & Produits */}
-                    <div style={{flex: 2, display: 'flex', flexDirection: 'column', gap: 20}}>
-                        
-                        {/* Filtres Catégories */}
-                        <div style={{display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 5}}>
-                            {Object.keys(PRODUCTS).map(cat => (
-                                <button 
-                                    key={cat}
-                                    onClick={() => setActiveCategory(cat)}
-                                    className="glass-panel"
-                                    style={{
-                                        padding: '10px 20px', 
-                                        border: activeCategory === cat ? '1px solid var(--primary)' : '1px solid var(--glass-border)',
-                                        background: activeCategory === cat ? 'rgba(6,182,212,0.15)' : 'var(--bg-panel)',
-                                        color: activeCategory === cat ? 'var(--primary)' : 'var(--text-muted)',
-                                        cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: 600, fontSize: '0.85rem'
-                                    }}
-                                >
-                                    {cat}
-                                </button>
-                            ))}
-                        </div>
-
-                        {/* Grille Produits */}
-                        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 15, overflowY: 'auto', paddingRight: 5}}>
-                            {PRODUCTS[activeCategory].map((prod, idx) => (
-                                <div 
-                                    key={idx} 
-                                    onClick={() => addToCart(prod)}
-                                    className="glass-panel"
-                                    style={{
-                                        padding: 15, cursor: 'pointer', display: 'flex', flexDirection: 'column', 
-                                        justifyContent: 'center', alignItems: 'center', textAlign: 'center', minHeight: 110,
-                                        transition: '0.2s', border: '1px solid var(--glass-border)'
-                                    }}
-                                    onMouseOver={(e) => {e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.transform = 'translateY(-3px)'}}
-                                    onMouseOut={(e) => {e.currentTarget.style.borderColor = 'var(--glass-border)'; e.currentTarget.style.transform = 'translateY(0)'}}
-                                >
-                                    <div style={{fontSize: '0.9rem', fontWeight: 600, marginBottom: 5}}>{prod.name}</div>
-                                    <div style={{fontFamily: 'var(--font-data)', color: 'var(--primary)', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.8rem'}}>
-                                        {prod.price} $
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Colonne Droite: Ticket */}
-                    <div className="glass-panel" style={{flex: 1, display: 'flex', flexDirection: 'column', padding: 20}}>
-                        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom: '1px dashed rgba(255,255,255,0.1)', paddingBottom: 15, marginBottom: 15}}>
-                            <span style={{fontWeight: 700}}>TICKET # {invoiceForm.invoiceNumber.split('-')[1]}</span>
-                            <span style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>{cart.reduce((a,b) => a+b.qty, 0)} articles</span>
-                        </div>
-
-                        <div style={{marginBottom: 15}}>
-                            <input type="text" className="input" placeholder="Nom Client" value={invoiceForm.client} onChange={e => setInvoiceForm({...invoiceForm, client: e.target.value})} />
-                        </div>
-
-                        <div style={{flex: 1, overflowY: 'auto', marginBottom: 15}}>
-                            {cart.length === 0 ? (
-                                <div style={{textAlign: 'center', color: 'var(--text-muted)', marginTop: 40, opacity: 0.5}}>
-                                    <i className="ri-shopping-basket-2-line" style={{fontSize: '3rem'}}></i>
-                                    <p>Panier vide</p>
-                                </div>
-                            ) : (
-                                cart.map((item, i) => (
-                                    <div key={i} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, background: 'rgba(255,255,255,0.03)', padding: 10, borderRadius: 8}}>
-                                        <div>
-                                            <div style={{fontSize: '0.9rem'}}>{item.name}</div>
-                                            <div style={{fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-data)'}}>{item.price}$ x {item.qty}</div>
-                                        </div>
-                                        <div style={{display: 'flex', gap: 5}}>
-                                            <button className="btn btn-icon btn-ghost" onClick={() => updateQty(i, -1)}>-</button>
-                                            <button className="btn btn-icon btn-ghost" onClick={() => updateQty(i, 1)}>+</button>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-
-                        <div style={{background: 'rgba(0,0,0,0.3)', padding: 15, borderRadius: 12}}>
-                            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 10}}>
-                                <select className="input" style={{width: 'auto', padding: '5px 10px', fontSize: '0.8rem'}} value={invoiceForm.discount} onChange={e => setInvoiceForm({...invoiceForm, discount: Number(e.target.value)})}>
-                                    <option value={0}>Remise 0%</option>
-                                    <option value={10}>VIP -10%</option>
-                                    <option value={50}>Employé -50%</option>
-                                    <option value={100}>Offert -100%</option>
-                                </select>
-                                <div style={{textAlign: 'right'}}>
-                                    <div style={{fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase'}}>Total Net</div>
-                                    <div style={{fontSize: '1.4rem', fontWeight: 800, color: 'var(--primary)', fontFamily: 'var(--font-data)'}}>{calculateTotal().total} $</div>
-                                </div>
-                            </div>
-                            <button className="btn btn-primary" style={{width: '100%'}} onClick={handleSendInvoice} disabled={loading}>
-                                {loading ? 'Envoi...' : <span><i className="ri-secure-payment-line"></i> ENCAISSER</span>}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* CONTENT: ADMIN (RH) */}
-            {currentTab === 'admin' && (
-                <div className="anim-enter" style={{maxWidth: 600, margin: '0 auto'}}>
-                    {!adminUnlocked ? (
-                        <div className="glass-panel" style={{padding: 40, textAlign: 'center'}}>
-                            <i className="ri-lock-password-fill" style={{fontSize: '3rem', color: '#ef4444', marginBottom: 20}}></i>
-                            <h3>Accès Direction</h3>
-                            <input type="password" className="input" placeholder="CODE PIN" style={{textAlign: 'center', fontSize: '1.5rem', letterSpacing: 5, fontFamily: 'var(--font-data)', marginBottom: 20}} value={pin} onChange={e => setPin(e.target.value)} />
-                            <button className="btn btn-primary" style={{width: '100%', background: '#ef4444'}} onClick={() => pin === '1234' ? setAdminUnlocked(true) : alert('Code faux')}>DÉVERROUILLER</button>
-                        </div>
-                    ) : (
-                        <div className="glass-panel" style={{padding: 30}}>
-                            <div style={{display:'flex', justifyContent:'space-between', marginBottom: 20}}>
-                                <h3 style={{margin:0}}>Gestion RH</h3>
-                                <button className="btn btn-ghost btn-icon" onClick={() => setAdminUnlocked(false)}><i className="ri-lock-line"></i></button>
-                            </div>
-                            
-                            <div style={{display:'grid', gap: 15}}>
-                                <div>
-                                    <label style={{fontSize:'0.75rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Type d'action</label>
-                                    <select className="input" value={hrForm.type} onChange={e => setHrForm({...hrForm, type: e.target.value})}>
-                                        <option value="recrutement">Recrutement</option>
-                                        <option value="licenciement">Licenciement</option>
-                                        <option value="avertissement">Avertissement</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label style={{fontSize:'0.75rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Cible</label>
-                                    <input className="input" placeholder="Nom de l'employé" value={hrForm.target} onChange={e => setHrForm({...hrForm, target: e.target.value})} />
-                                </div>
-                                <div>
-                                    <label style={{fontSize:'0.75rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Notes</label>
-                                    <textarea className="input" rows={4} placeholder="Raison..." value={hrForm.reason} onChange={e => setHrForm({...hrForm, reason: e.target.value})}></textarea>
-                                </div>
-                                <button className="btn btn-primary" onClick={() => { alert('Dossier envoyé'); setHrForm({type:'recrutement', target:'', reason:''}) }}>SOUMETTRE DOSSIER</button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
-            
-            {/* CONTENT: ANNUAIRE */}
-            {currentTab === 'annuaire' && (
-                <div className="anim-enter" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 20}}>
-                    {CONFIG.default_employees.map((emp, i) => (
-                        <div key={i} className="glass-panel" style={{padding: 20, textAlign: 'center', cursor: 'pointer', transition: '0.3s'}} onMouseOver={e => e.currentTarget.style.borderColor = 'var(--primary)'} onMouseOut={e => e.currentTarget.style.borderColor = 'var(--glass-border)'}>
-                            <div style={{width: 60, height: 60, background: 'var(--bg-deep)', borderRadius: '50%', margin: '0 auto 15px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--primary)', fontSize: '1.2rem', fontWeight: 700}}>
-                                {emp.charAt(0)}
-                            </div>
-                            <div style={{fontWeight: 700}}>{emp}</div>
-                            <div style={{fontSize: '0.8rem', color: 'var(--text-muted)'}}>Employé</div>
-                            <div style={{marginTop: 15, fontFamily: 'var(--font-data)', fontSize: '0.9rem', color: 'var(--primary)'}}>555-{1000+i}</div>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-          </div>
         </div>
       )}
-    </>
+
+      {modalContact && (
+        <div className="login-gate" style={{background:'rgba(0,0,0,0.9)', zIndex:2200}}>
+            <div className="card" style={{width:380, textAlign:'center', paddingTop:40, borderColor:'var(--primary)'}}>
+                <img src={modalContact.photo || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} style={{width:120, height:120, borderRadius:'50%', marginBottom:20, border:'4px solid var(--primary)', objectFit:'cover'}} />
+                <h3 style={{fontSize:'1.6rem', marginBottom:5}}>{modalContact.prenom} {modalContact.nom}</h3>
+                <div style={{fontSize:'1.4rem', fontWeight:700, color:'var(--text-muted)', marginBottom:30, fontFamily:'var(--font-data)'}}>{modalContact.tel}</div>
+                <div className="grid-2">
+                    <button className="btn btn-primary" onClick={() => alert("Simulation Appel...")}>APPELER</button>
+                    <button className="btn btn-ghost" onClick={() => setModalContact(null)}>FERMER</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {modalAddContact && (
+        <div className="login-gate" style={{background:'rgba(0,0,0,0.8)', zIndex:2100}}>
+            <div className="card" style={{width:450}}>
+                <h3>Ajouter Contact</h3>
+                <form onSubmit={saveContact} style={{marginTop:20}}>
+                    <div className="grid-2" style={{marginBottom:15}}>
+                        <input className="input" placeholder="Nom" required onChange={e=>setNewContact({...newContact, nom:e.target.value})} />
+                        <input className="input" placeholder="Prénom" required onChange={e=>setNewContact({...newContact, prenom:e.target.value})} />
+                    </div>
+                    <input className="input" placeholder="Tel" required style={{marginBottom:15}} onChange={e=>setNewContact({...newContact, tel:e.target.value})} />
+                    <input className="input" placeholder="URL Photo" style={{marginBottom:20}} onChange={e=>setNewContact({...newContact, photo:e.target.value})} />
+                    <div className="grid-2">
+                        <button type="button" className="btn btn-ghost" onClick={() => setModalAddContact(false)}>Annuler</button>
+                        <button type="submit" className="btn btn-success">Sauvegarder</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
+    </div>
   );
 }
-
-```
-
