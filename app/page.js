@@ -1,188 +1,249 @@
+// app/page.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
 
-function randInvoice() {
-  return 'INV-' + Math.floor(100000 + Math.random() * 900000);
+type Meta = {
+  version: string;
+  serverTime: string;
+  employees: string[];
+  directory: Array<{ name: string; role: string; avatar: string; phone: string }>;
+  employeeDiscounts: Record<string, { role: string; discount: number }>;
+  products: string[];
+  productsByCategory: Record<string, string[]>;
+  prices: Record<string, number>;
+  enterprises: Record<string, { discount: number; phone?: string; image?: string }>;
+  currencySymbol: string;
+  currencyCode: string;
+  totals: { employees: number; products: number };
+  ui?: { adminPin?: string }; // si tu veux éviter de renvoyer le pin au client: retire et check côté serveur only
+};
+
+type CartItem = { desc: string; qty: number; pu: number };
+
+function randomInvoice() {
+  return `INV-${Math.floor(Math.random() * 1_000_000)}`;
 }
 
 export default function VespucciTitanium() {
-  const [meta, setMeta] = useState(null);
+  const [meta, setMeta] = useState<Meta | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Session
   const [user, setUser] = useState('');
-  const [view, setView] = useState('login'); // login | app
-  const [tab, setTab] = useState('dashboard'); // dashboard | invoice | direction | annuaire
+  const [view, setView] = useState<'login' | 'app'>('login');
+  const [tab, setTab] = useState<'dashboard' | 'invoice' | 'direction' | 'annuaire'>('dashboard');
 
-  // Toast
-  const [toast, setToast] = useState(null);
-  const notify = (t, m, s = 'info') => {
-    setToast({ t, m, s });
-    setTimeout(() => setToast(null), 3500);
-  };
+  const [toast, setToast] = useState<{ m: string; t: 'success' | 'error' | 'info' } | null>(null);
 
-  // Caisse
-  const [invoiceNumber, setInvoiceNumber] = useState(randInvoice());
+  // invoice
+  const [search, setSearch] = useState('');
+  const [openCat, setOpenCat] = useState<string | null>(null);
+  const [cart, setCart] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
+  const [invoiceNumber, setInvoiceNumber] = useState(randomInvoice());
   const [enterprise, setEnterprise] = useState('');
   const [discountActivated, setDiscountActivated] = useState(false);
   const [employeeCard, setEmployeeCard] = useState(false);
-  const [search, setSearch] = useState('');
-  const [openCat, setOpenCat] = useState(null);
-  const [cart, setCart] = useState([]); // { desc, qty, price }
 
-  // Direction
+  // direction
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminPin, setAdminPin] = useState('');
-  const ADMIN_CODE = '123459'; // mets le tiens (ou gère côté serveur si tu veux)
 
-  const [hrModal, setHrModal] = useState(null); // {type}
-  const [hrTarget, setHrTarget] = useState('');
+  const [hrModal, setHrModal] = useState<null | {
+    type: 'recrutement' | 'convocation' | 'avertissement' | 'licenciement' | 'demission' | 'depense';
+    title: string;
+    targetLabel: string;
+  }>(null);
+
+  const [hrTarget, setHrTarget] = useState(''); // employé cible OU montant
   const [hrDate, setHrDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [hrReason, setHrReason] = useState('');
   const [hrDetails, setHrDetails] = useState('');
 
-  // API helper
-  const api = async (action, data) => {
-    const r = await fetch('/api', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, data }),
-    });
-    const j = await r.json();
-    if (!j.success) throw new Error(j.error || j.message || 'Erreur');
-    return j;
+  const currencySymbol = meta?.currencySymbol || '$';
+
+  const notify = (m: string, t: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ m, t });
+    setTimeout(() => setToast(null), 3200);
   };
 
-  // Load meta (comme getAppMeta)
+  const loadMeta = async () => {
+    try {
+      setLoading(true);
+      const r = await fetch('/api', { method: 'POST', body: JSON.stringify({ action: 'getMeta' }) });
+      const j = await r.json();
+      if (!j.success) throw new Error(j.error || 'Meta error');
+      setMeta(j);
+    } catch (e: any) {
+      notify(`Erreur chargement: ${e?.message || e}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    (async () => {
-      try {
-        const j = await api('getMeta', {});
-        setMeta(j);
-      } catch (e) {
-        notify('ERREUR', e.message || 'Impossible de charger les données', 'error');
-      } finally {
-        setLoading(false);
-      }
-    })();
+    const saved = localStorage.getItem('vespucci_user');
+    if (saved) {
+      setUser(saved);
+      setView('app');
+    }
+    loadMeta();
   }, []);
 
-  // Calculs caisse (comme Apps Script)
-  const subtotal = useMemo(() => cart.reduce((s, it) => s + it.qty * it.price, 0), [cart]);
+  // Totaux invoice
+  const employeeDiscountPct = meta?.employeeDiscounts?.[user]?.discount ?? 0;
+  const role = meta?.employeeDiscounts?.[user]?.role ?? 'Employé';
 
-  const discountPct = useMemo(() => {
-    if (!meta) return 0;
-    if (!discountActivated) return 0;
-    if (enterprise) return Number(meta.enterprises?.[enterprise]?.discount || 0) || 0;
-    return Number(meta.employeeDiscounts?.[user]?.discount || 0) || 0;
-  }, [meta, discountActivated, enterprise, user]);
+  const enterpriseDiscountPct = enterprise && meta?.enterprises?.[enterprise]
+    ? (meta.enterprises[enterprise].discount || 0)
+    : 0;
 
-  const discountAmount = useMemo(() => Number((subtotal * (discountPct / 100)).toFixed(2)), [subtotal, discountPct]);
-  const total = useMemo(() => Number((subtotal - discountAmount).toFixed(2)), [subtotal, discountAmount]);
+  const appliedDiscountPct = discountActivated
+    ? (enterprise ? enterpriseDiscountPct : employeeDiscountPct)
+    : 0;
 
-  const addToCart = (desc) => {
+  const discountType = discountActivated ? (enterprise ? 'Entreprise' : 'Employé') : 'Aucune';
+
+  const subtotal = useMemo(() => {
+    return cart.reduce((s, it) => s + it.qty * it.pu, 0);
+  }, [cart]);
+
+  const discountAmount = useMemo(() => +(subtotal * (appliedDiscountPct / 100)).toFixed(2), [subtotal, appliedDiscountPct]);
+  const total = useMemo(() => +(subtotal - discountAmount).toFixed(2), [subtotal, discountAmount]);
+
+  const filteredCategories = useMemo(() => {
+    if (!meta) return [];
+    const q = search.trim().toLowerCase();
+    const cats = Object.keys(meta.productsByCategory || {});
+    if (!q) return cats;
+    return cats.filter(cat => (meta.productsByCategory[cat] || []).some(p => p.toLowerCase().includes(q)));
+  }, [meta, search]);
+
+  const productsOfCat = (cat: string) => {
+    const list = meta?.productsByCategory?.[cat] || [];
+    const q = search.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(p => p.toLowerCase().includes(q));
+  };
+
+  const addToCart = (desc: string) => {
     if (!meta) return;
-    const price = Number(meta.prices?.[desc] || 0);
-    setCart((prev) => {
-      const copy = [...prev];
-      const i = copy.findIndex((x) => x.desc === desc);
-      if (i >= 0) copy[i] = { ...copy[i], qty: copy[i].qty + 1 };
-      else copy.push({ desc, qty: 1, price });
-      return copy;
+    const pu = meta.prices?.[desc] ?? 0;
+    setCart(prev => {
+      const idx = prev.findIndex(x => x.desc === desc);
+      if (idx >= 0) {
+        const n = [...prev];
+        n[idx] = { ...n[idx], qty: n[idx].qty + 1 };
+        return n;
+      }
+      return [...prev, { desc, qty: 1, pu }];
     });
   };
 
-  const modQty = (idx, delta) => {
-    setCart((prev) => {
-      const copy = [...prev];
-      const it = copy[idx];
-      if (!it) return prev;
-      const q = it.qty + delta;
-      if (q <= 0) copy.splice(idx, 1);
-      else copy[idx] = { ...it, qty: q };
-      return copy;
+  const modQty = (desc: string, delta: number) => {
+    setCart(prev => {
+      const n = prev.map(it => it.desc === desc ? { ...it, qty: it.qty + delta } : it)
+        .filter(it => it.qty > 0);
+      return n;
     });
   };
+
+  const clearCart = () => setCart([]);
 
   const submitInvoice = async () => {
-    if (!cart.length) return notify('PANIER', 'Panier vide', 'error');
+    if (!meta) return;
+    if (!user) return notify('Session invalide', 'error');
+    if (cart.length === 0) return notify('Panier vide', 'error');
 
     try {
       const payload = {
         employee: user,
         invoiceNumber,
-        enterprise: enterprise || '',
-        customerName: customerName || '',
+        enterprise,
+        customerName,
         employeeCard,
         discountActivated,
-        items: cart.map((x) => ({ desc: x.desc, qty: x.qty })),
+        items: cart.map(i => ({ desc: i.desc, qty: i.qty })),
       };
 
-      const res = await api('sendFactures', payload);
-      notify('FACTURE', res.message || 'Facture envoyée', 'success');
+      const r = await fetch('/api', { method: 'POST', body: JSON.stringify({ action: 'sendFactures', data: payload }) });
+      const j = await r.json();
+      if (!j.success) throw new Error(j.error || 'Erreur facture');
 
-      // reset
-      setCart([]);
+      notify('Facture envoyée et enregistrée.', 'success');
+      clearCart();
       setCustomerName('');
+      setInvoiceNumber(randomInvoice());
       setEnterprise('');
       setDiscountActivated(false);
       setEmployeeCard(false);
-      setInvoiceNumber(randInvoice());
-    } catch (e) {
-      notify('ERREUR FACTURE', e.message, 'error');
+    } catch (e: any) {
+      notify(e?.message || 'Erreur envoi facture', 'error');
     }
   };
 
-  const openHR = (type) => {
-    setHrModal({ type });
+  const openHR = (type: any) => {
+    const map: any = {
+      recrutement: { title: '➕ Recrutement', targetLabel: 'EMPLOYÉ CIBLE' },
+      convocation: { title: '📋 Convocation', targetLabel: 'EMPLOYÉ CIBLE' },
+      avertissement: { title: '⚠️ Avertissement', targetLabel: 'EMPLOYÉ CIBLE' },
+      licenciement: { title: '🔴 Licenciement', targetLabel: 'EMPLOYÉ CIBLE' },
+      demission: { title: '📝 Démission', targetLabel: 'EMPLOYÉ CIBLE' },
+      depense: { title: '💸 Dépense Entreprise', targetLabel: 'MONTANT ($)' },
+    };
+
+    setHrModal({ type, ...map[type] });
     setHrTarget('');
-    setHrDate(new Date().toISOString().slice(0, 10));
     setHrReason('');
     setHrDetails('');
+    setHrDate(new Date().toISOString().slice(0, 10));
   };
 
   const submitHR = async () => {
-    if (!hrModal?.type) return;
-    if (!hrTarget || !hrDate || !hrReason) return notify('RH', 'Champs incomplets', 'error');
+    if (!meta) return;
+    if (!user) return notify('Session invalide', 'error');
+    if (!hrModal) return;
 
     try {
       const isExpense = hrModal.type === 'depense';
-      const payload = {
+
+      const payload: any = {
         type: hrModal.type,
-        employee: hrTarget, // Apps Script: "employee" = cible ou montant
-        amount: isExpense ? hrTarget : undefined,
-        date: new Date(hrDate).toISOString(),
-        reason: hrReason,
         initiatedBy: user,
-        details: hrDetails || '',
+        reason: hrReason,
+        date: hrDate,
+        details: hrDetails,
       };
 
-      await api('sendHR', payload);
-      notify('DIRECTION', 'Dossier transmis', 'success');
+      if (isExpense) {
+        payload.amount = hrTarget; // montant
+      } else {
+        payload.employeeTarget = hrTarget; // employé concerné
+      }
+
+      const r = await fetch('/api', { method: 'POST', body: JSON.stringify({ action: 'sendHR', data: payload }) });
+      const j = await r.json();
+      if (!j.success) throw new Error(j.error || 'Erreur RH');
+
+      notify('Dossier transmis.', 'success');
       setHrModal(null);
-    } catch (e) {
-      notify('ERREUR RH', e.message, 'error');
+    } catch (e: any) {
+      notify(e?.message || 'Erreur RH', 'error');
     }
   };
 
-  const doLogin = () => {
-    if (!user) return;
-    setView('app');
-    notify('SESSION', `Bienvenue ${user}`, 'success');
-  };
-
-  const doLogout = () => {
+  const logout = () => {
+    localStorage.removeItem('vespucci_user');
+    setUser('');
     setView('login');
     setTab('dashboard');
     setAdminUnlocked(false);
-    setAdminPin('');
-    setCart([]);
-    setCustomerName('');
-    setInvoiceNumber(randInvoice());
+    notify('Déconnecté.', 'info');
   };
 
+  // =======================
+  // UI
+  // =======================
   if (loading && !meta) {
     return (
       <div style={{ minHeight: '100vh', background: '#000', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -193,8 +254,7 @@ export default function VespucciTitanium() {
 
   return (
     <>
-      {/* Styles (reprend ton style “Titanium”, version compacte mais compatible) */}
-      <style>{`
+      <style dangerouslySetInnerHTML={{ __html: `
         :root {
           --primary: #06b6d4;
           --primary-600: #0891b2;
@@ -213,570 +273,548 @@ export default function VespucciTitanium() {
           --font-ui: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
           --font-data: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         }
-        * { box-sizing: border-box; }
-        body { margin:0; font-family: var(--font-ui); background: var(--bg-deep); color: var(--text); }
-        body::before{
-          content:""; position:fixed; inset:0; z-index:-2;
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          font-family: var(--font-ui);
+          background-color: var(--bg-deep);
+          color: var(--text);
+          min-height: 100vh;
+          overflow-x: hidden;
+        }
+        body::before {
+          content: "";
+          position: fixed;
+          inset: 0;
+          z-index: -2;
           background:
             radial-gradient(circle at 50% 10%, #1e1e3f 0%, #05050a 100%),
-            linear-gradient(45deg, rgba(255,255,255,0.03) 1px, transparent 1px),
-            linear-gradient(-45deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+            linear-gradient(45deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+            linear-gradient(-45deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
           background-size: 100% 100%, 40px 40px, 40px 40px;
           background-attachment: fixed;
         }
-        .hidden { display:none !important; }
-        .btn {
-          display:inline-flex; align-items:center; justify-content:center; gap:10px;
-          padding: 12px 18px; border-radius: 12px; font-weight: 800;
-          cursor:pointer; border: 1px solid transparent; letter-spacing: .5px; text-transform: uppercase; font-size: .8rem;
-        }
-        .btn-primary { background: var(--gradient-primary); color:#fff; box-shadow: 0 4px 20px -5px var(--primary-glow); }
-        .btn-ghost { background: rgba(255,255,255,0.03); border:1px solid var(--glass-border); color: var(--text-muted); }
-        .btn-danger { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25); color: #ffb4b4; }
-        .input, select, textarea {
-          width:100%; padding: 14px 18px; border-radius: 12px;
-          background: rgba(0,0,0,0.4); border:1px solid var(--glass-border);
-          color:#fff; font-size: .95rem;
-        }
+        .hidden { display: none !important; }
         .card {
           background: var(--bg-panel);
           backdrop-filter: blur(20px) saturate(180%);
-          border:1px solid var(--glass-border);
+          border: 1px solid var(--glass-border);
           border-top: 1px solid var(--glass-highlight);
-          border-radius: 20px; padding: 22px;
+          border-radius: 20px;
+          padding: 25px;
           box-shadow: 0 20px 40px rgba(0,0,0,0.4);
         }
-        .wrap { max-width: 1400px; margin: 0 auto; padding: 18px; }
-        .topbar {
-          display:flex; justify-content:space-between; align-items:center;
-          padding: 14px 18px; margin: 18px 0 22px;
-          background: rgba(20,20,35,.6);
+        .btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          padding: 12px 18px;
+          border-radius: 12px;
+          font-weight: 800;
+          cursor: pointer;
+          border: 1px solid transparent;
+          text-transform: uppercase;
+          font-size: 0.8rem;
+        }
+        .btn-primary { background: var(--gradient-primary); color: white; border: none; box-shadow: 0 4px 20px -5px var(--primary-glow); }
+        .btn-ghost { background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); color: var(--text-muted); }
+        .btn-danger { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25); color: #fca5a5; }
+        .input, select, textarea {
+          width: 100%;
+          padding: 12px 14px;
+          border-radius: 12px;
+          background: rgba(0, 0, 0, 0.4);
           border: 1px solid var(--glass-border);
-          border-radius: 18px;
-          position: sticky; top: 14px; z-index: 50;
-          backdrop-filter: blur(18px);
+          color: white;
+          font-family: var(--font-ui);
+          font-size: 0.95rem;
         }
-        .bento { display:grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+        .app-container { max-width: 1400px; margin: 0 auto; padding: 20px; padding-bottom: 80px; }
+        .topbar {
+          display: flex; justify-content: space-between; align-items: center;
+          padding: 15px 20px; margin-bottom: 30px;
+          background: rgba(20, 20, 35, 0.6); backdrop-filter: blur(20px);
+          border: 1px solid var(--glass-border); border-radius: 18px;
+          position: sticky; top: 12px; z-index: 50;
+        }
+        .bento-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
         .widget {
-          background: var(--bg-panel); border:1px solid var(--glass-border);
-          border-radius: 20px; padding: 22px; min-height: 150px;
-          cursor:pointer; display:flex; flex-direction:column; justify-content:space-between;
+          background: var(--bg-panel);
+          border: 1px solid var(--glass-border);
+          border-radius: 20px;
+          padding: 22px;
+          cursor: pointer;
+          min-height: 160px;
+          display:flex; flex-direction:column; justify-content:space-between;
         }
+        .widget:hover { border-color: var(--primary-600); transform: translateY(-2px); }
         .w-large { grid-column: span 2; grid-row: span 2; }
-        .w-stat { font-family: var(--font-data); font-size: 2.2rem; font-weight: 900; margin: 10px 0; }
-        .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .pos { display:grid; grid-template-columns: 2fr 1.05fr; gap: 18px; height: calc(100vh - 160px); }
-        .catalog { overflow:hidden; display:flex; flex-direction:column; gap: 12px; }
-        .scroll { overflow:auto; padding-right: 6px; flex:1; }
-        .accHead {
-          display:flex; justify-content:space-between; align-items:center;
-          padding: 14px 16px;
-          background: rgba(255,255,255,0.03);
+        .w-wide { grid-column: span 4; min-height: 100px; display:flex; align-items:center; justify-content:space-between; }
+        .w-stat { font-family: var(--font-data); font-size: 2.2rem; font-weight: 900; }
+        .pos-layout { display:grid; grid-template-columns: 2fr 1.1fr; gap: 20px; height: calc(100vh - 160px); }
+        .accordion { overflow-y:auto; height: 100%; padding-right: 8px; }
+        .cat {
           border: 1px solid var(--glass-border);
           border-radius: 14px;
-          cursor:pointer;
+          margin-bottom: 10px;
+          overflow:hidden;
+          background: rgba(0,0,0,0.15);
         }
-        .accBody { padding: 14px; border: 1px solid var(--glass-border); border-top:none; border-radius: 0 0 14px 14px; background: rgba(0,0,0,0.22); }
-        .prodGrid { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
-        .prod {
-          background: rgba(255,255,255,0.03);
-          border:1px solid var(--glass-border);
+        .cat-h { padding: 14px 16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; }
+        .cat-h:hover { background: rgba(255,255,255,0.04); }
+        .cat-b { padding: 14px; display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+        .product {
+          border: 1px solid var(--glass-border);
           border-radius: 12px;
           padding: 12px;
+          background: rgba(255,255,255,0.03);
           cursor:pointer;
           text-align:center;
-          display:flex; flex-direction:column; gap: 6px;
         }
-        .price { font-family: var(--font-data); color: var(--primary); font-weight: 900; font-size: .9rem; }
+        .product:hover { border-color: var(--primary); background: rgba(6,182,212,0.10); }
+        .price { font-family: var(--font-data); color: var(--primary); font-weight: 900; margin-top: 6px; }
         .ticket {
-          background: #0b0c12; border:1px solid var(--glass-border);
+          background: #0b0c12; border: 1px solid var(--glass-border);
           border-radius: 20px; overflow:hidden;
           display:flex; flex-direction:column;
         }
-        .ticketHead { padding: 16px; border-bottom: 1px dashed var(--glass-border); background: rgba(255,255,255,0.02); }
-        .ticketBody { flex:1; overflow:auto; padding: 14px; }
-        .line {
-          display:flex; justify-content:space-between; align-items:center;
-          padding: 10px 12px; margin-bottom: 8px;
-          border-radius: 12px;
-          background: rgba(255,255,255,0.03);
-          border-left: 2px solid var(--glass-border);
-        }
-        .qtyBtn { width: 28px; height: 28px; border-radius: 10px; border:1px solid var(--glass-border); background: rgba(255,255,255,0.03); color:#fff; cursor:pointer; }
-        .ticketFoot { padding: 16px; border-top: 1px solid var(--glass-border); background: rgba(15,15,22,0.95); }
-        .muted { color: var(--text-muted); font-size: .85rem; }
+        .ticket-head { padding: 16px; border-bottom: 1px dashed var(--glass-border); }
+        .cart { flex:1; overflow-y:auto; padding: 14px; }
+        .cart-item { display:flex; justify-content:space-between; align-items:center; padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.06); }
+        .cart-actions { display:flex; gap: 8px; align-items:center; }
+        .qty-btn { width: 34px; height: 34px; border-radius: 10px; }
+        .ticket-foot { padding: 16px; border-top: 1px solid var(--glass-border); background: rgba(15,15,22,0.95); }
+        .row { display:flex; justify-content:space-between; margin-bottom: 8px; color: var(--text-muted); font-size: 0.9rem; }
+        .row strong { color: var(--text); }
         .toast {
-          position: fixed; right: 20px; bottom: 20px; z-index: 9999;
-          background: rgba(15,15,22,0.95);
-          border:1px solid var(--glass-border);
-          border-left: 4px solid var(--primary);
-          border-radius: 16px;
-          padding: 12px 16px;
+          position: fixed; bottom: 25px; right: 25px; z-index: 9999;
+          padding: 14px 18px; border-radius: 14px;
+          border: 1px solid var(--glass-border);
+          background: rgba(10,10,14,0.85); backdrop-filter: blur(10px);
           min-width: 260px;
-          box-shadow: 0 20px 50px rgba(0,0,0,0.5);
         }
-        .toast.error { border-left-color: var(--danger); }
-        .toast.success { border-left-color: var(--success); }
-        .modalBack {
-          position: fixed; inset:0; background: rgba(0,0,0,0.75);
+        .modal {
+          position: fixed; inset: 0; z-index: 9998;
+          background: rgba(0,0,0,0.75);
           display:flex; align-items:center; justify-content:center;
-          z-index: 9998;
+          padding: 20px;
         }
-        .modal { width: min(560px, 92vw); }
-        .dirGrid { display:grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-        .miniCard {
-          background: rgba(255,255,255,0.02);
-          border:1px solid var(--glass-border);
-          border-radius: 16px;
-          padding: 14px;
-          cursor:pointer;
-        }
-        .ann { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
-        .avatar {
-          width: 70px; height: 70px; border-radius: 50%;
-          border: 3px solid rgba(255,255,255,0.08);
-          object-fit: cover;
-          margin-bottom: 10px;
-        }
-      `}</style>
+      `}} />
 
-      {/* TOAST */}
       {toast && (
-        <div className={`toast ${toast.s}`}>
-          <div style={{ fontWeight: 900, marginBottom: 4 }}>{toast.t}</div>
-          <div className="muted">{toast.m}</div>
+        <div className="toast">
+          <div style={{ fontWeight: 900, marginBottom: 4, color: toast.t === 'error' ? '#fca5a5' : toast.t === 'success' ? '#86efac' : '#e2e8f0' }}>
+            {toast.t.toUpperCase()}
+          </div>
+          <div style={{ color: 'var(--text-muted)' }}>{toast.m}</div>
         </div>
       )}
 
-      <div className="wrap">
-        {/* LOGIN */}
-        {view === 'login' ? (
-          <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div className="card" style={{ width: 420, textAlign: 'center' }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>💎</div>
-              <div style={{ fontWeight: 900, fontSize: '1.8rem' }}>VESPUCCI</div>
-              <div className="muted" style={{ marginBottom: 18, textTransform: 'uppercase', letterSpacing: 2 }}>
-                Titanium Access • v{meta?.version}
-              </div>
-
-              <div style={{ textAlign: 'left', marginBottom: 14 }}>
-                <div style={{ fontSize: '.75rem', fontWeight: 900, color: 'var(--primary)', marginBottom: 6 }}>
-                  Identifiant
-                </div>
-                <select className="input" value={user} onChange={(e) => setUser(e.target.value)}>
-                  <option value="">Choisir une identité...</option>
-                  {meta?.employees?.map((e) => (
-                    <option key={e} value={e}>
-                      {e}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <button className="btn btn-primary" style={{ width: '100%' }} onClick={doLogin} disabled={!user}>
-                INITIALISER LA SESSION
-              </button>
+      {view === 'login' ? (
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 }}>
+          <div className="card" style={{ width: 420, textAlign: 'center' }}>
+            <div style={{ fontWeight: 900, fontSize: '1.8rem', marginBottom: 6 }}>VESPUCCI</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 20 }}>
+              Titanium Terminal • v{meta?.version || '—'}
             </div>
+
+            <div style={{ textAlign: 'left', marginBottom: 12 }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 900, marginBottom: 8 }}>IDENTIFIANT</div>
+              <select className="input" value={user} onChange={(e) => setUser(e.target.value)}>
+                <option value="">Choisir une identité...</option>
+                {meta?.employees?.map((e) => (
+                  <option key={e} value={e}>{e}</option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%', height: 52 }}
+              disabled={!user}
+              onClick={() => {
+                localStorage.setItem('vespucci_user', user);
+                setView('app');
+                notify(`Bienvenue ${user}`, 'success');
+              }}
+            >
+              INITIALISER LA SESSION
+            </button>
+
+            <button
+              className="btn btn-ghost"
+              style={{ width: '100%', marginTop: 10 }}
+              onClick={loadMeta}
+            >
+              SYNCHRONISER DONNÉES (SHEET)
+            </button>
           </div>
-        ) : (
-          <>
-            {/* TOPBAR */}
-            <div className="topbar">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }} onClick={() => setTab('dashboard')}>
-                <div style={{ width: 42, height: 42, borderRadius: 12, background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  💎
-                </div>
-                <div>
-                  <div style={{ fontWeight: 900, letterSpacing: -0.3 }}>VESPUCCI</div>
-                  <div className="muted" style={{ textTransform: 'uppercase', letterSpacing: 2 }}>
-                    Manager • {meta?.currencyCode}
-                  </div>
-                </div>
+        </div>
+      ) : (
+        <div className="app-container">
+          <header className="topbar">
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer' }} onClick={() => setTab('dashboard')}>
+              <div style={{
+                width: 40, height: 40, borderRadius: 12,
+                background: 'var(--gradient-primary)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 900
+              }}>
+                V
               </div>
-
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button className="btn btn-ghost" onClick={() => setTab('dashboard')}>
-                  Dashboard
-                </button>
-                <button className="btn btn-ghost" onClick={() => setTab('invoice')}>
-                  Caisse
-                </button>
-                <button className="btn btn-ghost" onClick={() => setTab('direction')}>
-                  Direction
-                </button>
-                <button className="btn btn-ghost" onClick={() => setTab('annuaire')}>
-                  Annuaire
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontWeight: 900 }}>{user}</div>
-                  <div className="muted" style={{ color: 'var(--primary)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1 }}>
-                    {meta?.employeeDiscounts?.[user]?.role || 'Employé'}
-                  </div>
-                </div>
-                <button className="btn btn-danger" onClick={doLogout}>
-                  ⏻
-                </button>
+              <div>
+                <div style={{ fontWeight: 900 }}>VESPUCCI</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Manager • v{meta?.version || '—'}</div>
               </div>
             </div>
 
-            {/* DASHBOARD */}
-            {tab === 'dashboard' && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', marginBottom: 18 }}>
-                  <div>
-                    <div style={{ fontSize: '2rem', fontWeight: 900, letterSpacing: -1 }}>Aperçu Global</div>
-                    <div className="muted">Terminal connecté • Produits: {meta?.totals?.products} • Employés: {meta?.totals?.employees}</div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className={`btn ${tab === 'dashboard' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('dashboard')}>Dashboard</button>
+              <button className={`btn ${tab === 'invoice' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('invoice')}>Caisse</button>
+              <button className={`btn ${tab === 'direction' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('direction')}>Direction</button>
+              <button className={`btn ${tab === 'annuaire' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('annuaire')}>Annuaire</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontWeight: 900 }}>{user}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 900 }}>{role}</div>
+              </div>
+              <button className="btn btn-danger" onClick={logout}>OFF</button>
+            </div>
+          </header>
+
+          {tab === 'dashboard' && (
+            <section>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', marginBottom: 20 }}>
+                <div>
+                  <div style={{ fontSize: '2.2rem', fontWeight: 900, letterSpacing: '-1px' }}>Aperçu Global</div>
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    Employés: {meta?.totals.employees || 0} • Produits: {meta?.totals.products || 0}
                   </div>
-                  <div className="muted" style={{ fontFamily: 'var(--font-data)' }}>
+                </div>
+                <button className="btn btn-ghost" onClick={loadMeta}>☁️ Sync Sheet</button>
+              </div>
+
+              <div className="bento-grid">
+                <div className="widget w-large" onClick={() => setTab('invoice')}>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontWeight: 900, fontSize: '0.8rem' }}>MODULE VENTE</div>
+                    <div className="w-stat" style={{ marginTop: 10 }}>CAISSE</div>
+                    <div style={{ color: 'rgba(255,255,255,0.6)', marginTop: 8 }}>Catalogue + facturation + remises</div>
+                  </div>
+                  <button className="btn btn-primary">Ouvrir</button>
+                </div>
+
+                <div className="widget" onClick={() => setTab('direction')}>
+                  <div style={{ color: 'var(--accent)', fontWeight: 900, fontSize: '0.8rem' }}>ADMIN</div>
+                  <div className="w-stat">RH</div>
+                  <div style={{ color: 'var(--text-muted)' }}>Dossiers staff & dépenses</div>
+                </div>
+
+                <div className="widget" onClick={() => setTab('annuaire')}>
+                  <div style={{ color: 'var(--success)', fontWeight: 900, fontSize: '0.8rem' }}>CONTACTS</div>
+                  <div className="w-stat">TEL</div>
+                  <div style={{ color: 'var(--text-muted)' }}>Annuaire (Sheet)</div>
+                </div>
+
+                <div className="widget w-wide" style={{ cursor: 'default' }}>
+                  <div>
+                    <div style={{ fontWeight: 900 }}>SYSTÈME OPÉRATIONNEL</div>
+                    <div style={{ color: 'var(--text-muted)' }}>Données live depuis Google Sheets</div>
+                  </div>
+                  <div style={{ fontFamily: 'var(--font-data)', color: 'var(--primary)', fontWeight: 900 }}>
                     {new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
-
-                <div className="bento">
-                  <div className="widget w-large" onClick={() => setTab('invoice')}>
-                    <div>
-                      <div className="muted" style={{ textTransform: 'uppercase', fontWeight: 900, letterSpacing: 2 }}>
-                        Module Vente
-                      </div>
-                      <div className="w-stat">CAISSE</div>
-                      <div className="muted">Catalogue + facturation + Sheet + Discord</div>
-                    </div>
-                    <button className="btn btn-primary">Ouvrir</button>
-                  </div>
-
-                  <div className="widget" onClick={() => setTab('direction')}>
-                    <div>
-                      <div className="muted" style={{ textTransform: 'uppercase', fontWeight: 900, letterSpacing: 2, color: 'var(--accent)' }}>
-                        Administration
-                      </div>
-                      <div className="w-stat" style={{ fontSize: '1.8rem' }}>RH</div>
-                      <div className="muted">Convoc / avertiss / dépense / etc.</div>
-                    </div>
-                  </div>
-
-                  <div className="widget" onClick={() => setTab('annuaire')}>
-                    <div>
-                      <div className="muted" style={{ textTransform: 'uppercase', fontWeight: 900, letterSpacing: 2, color: 'var(--success)' }}>
-                        Contacts
-                      </div>
-                      <div className="w-stat" style={{ fontSize: '1.8rem' }}>TEL</div>
-                      <div className="muted">Annuaire depuis le Sheet</div>
-                    </div>
-                  </div>
-
-                  <div className="widget" style={{ cursor: 'default' }}>
-                    <div>
-                      <div className="muted" style={{ textTransform: 'uppercase', fontWeight: 900, letterSpacing: 2 }}>
-                        Système
-                      </div>
-                      <div style={{ fontFamily: 'var(--font-data)', fontWeight: 900, fontSize: '1.4rem', color: 'var(--primary)' }}>
-                        v{meta?.version}
-                      </div>
-                      <div className="muted">API / Discord / Sheets</div>
-                    </div>
-                  </div>
-                </div>
               </div>
-            )}
+            </section>
+          )}
 
-            {/* INVOICE */}
-            {tab === 'invoice' && (
-              <div className="pos">
-                {/* Catalogue */}
-                <div className="catalog">
-                  <input className="input" placeholder="Rechercher un service..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          {tab === 'invoice' && (
+            <section>
+              <div className="pos-layout">
+                {/* Left: catalogue */}
+                <div className="card" style={{ padding: 16, overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+                    <input
+                      className="input"
+                      placeholder="Rechercher un service..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
+                    <button className="btn btn-ghost" onClick={() => { setSearch(''); setOpenCat(null); }}>Reset</button>
+                  </div>
 
-                  <div className="scroll">
-                    {Object.entries(meta.productsByCategory || {}).map(([cat, items]) => {
-                      const filtered = items.filter((p) => p.toLowerCase().includes(search.toLowerCase()));
-                      if (search && !filtered.length) return null;
-
-                      const isOpen = openCat === cat || Boolean(search);
-                      return (
-                        <div key={cat} style={{ marginBottom: 10 }}>
-                          <div className="accHead" onClick={() => setOpenCat(isOpen ? null : cat)}>
-                            <div style={{ fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1 }}>{cat}</div>
-                            <div className="muted">{isOpen ? '▲' : '▼'}</div>
-                          </div>
-                          {isOpen && (
-                            <div className="accBody">
-                              <div className="prodGrid">
-                                {(search ? filtered : items).map((p) => (
-                                  <div className="prod" key={p} onClick={() => addToCart(p)}>
-                                    <div style={{ fontWeight: 800, fontSize: '.85rem' }}>{p}</div>
-                                    <div className="price">
-                                      {meta.currencySymbol}
-                                      {Number(meta.prices?.[p] || 0).toFixed(2)}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                  <div className="accordion">
+                    {filteredCategories.map((cat) => (
+                      <div className="cat" key={cat}>
+                        <div
+                          className="cat-h"
+                          onClick={() => setOpenCat(prev => prev === cat ? null : cat)}
+                        >
+                          <div style={{ fontWeight: 900 }}>{cat}</div>
+                          <div style={{ color: 'var(--text-muted)' }}>{openCat === cat ? '▲' : '▼'}</div>
                         </div>
-                      );
-                    })}
+
+                        {openCat === cat && (
+                          <div className="cat-b">
+                            {productsOfCat(cat).map((p) => (
+                              <div key={p} className="product" onClick={() => addToCart(p)}>
+                                <div style={{ fontWeight: 800, fontSize: '0.85rem' }}>{p}</div>
+                                <div className="price">{currencySymbol}{(meta?.prices?.[p] ?? 0).toFixed(2)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                {/* Ticket */}
+                {/* Right: ticket */}
                 <div className="ticket">
-                  <div className="ticketHead">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                      <div style={{ fontWeight: 900, letterSpacing: 2 }}>TICKET</div>
-                      <div className="muted" style={{ fontFamily: 'var(--font-data)' }}>
-                        {cart.reduce((s, x) => s + x.qty, 0)} items
+                  <div className="ticket-head">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <div style={{ fontWeight: 900 }}>TICKET</div>
+                      <div style={{ fontFamily: 'var(--font-data)', color: 'var(--text-muted)' }}>
+                        {cart.reduce((s, i) => s + i.qty, 0)} items
                       </div>
                     </div>
 
-                    <div className="grid2">
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                       <input className="input" placeholder="Client" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
-                      <input className="input" placeholder="ID Facture" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
+                      <input className="input" placeholder="ID Facture" value={invoiceNumber} readOnly style={{ opacity: 0.7, fontFamily: 'var(--font-data)' }} />
                     </div>
 
-                    <div style={{ marginTop: 10 }} className="grid2">
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
                       <select className="input" value={enterprise} onChange={(e) => setEnterprise(e.target.value)}>
-                        <option value="">Entreprise (optionnel)</option>
-                        {Object.keys(meta.enterprises || {}).map((k) => (
-                          <option key={k} value={k}>
-                            {k} (-{meta.enterprises[k].discount}%)
-                          </option>
+                        <option value="">Aucune entreprise</option>
+                        {Object.keys(meta?.enterprises || {}).map((k) => (
+                          <option key={k} value={k}>{k} (-{meta?.enterprises?.[k]?.discount ?? 0}%)</option>
                         ))}
                       </select>
 
                       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                        <label className="muted" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 900, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                           <input type="checkbox" checked={discountActivated} onChange={(e) => setDiscountActivated(e.target.checked)} />
-                          Remise activée
+                          Remise
                         </label>
-
-                        <label className="muted" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 900, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                           <input type="checkbox" checked={employeeCard} onChange={(e) => setEmployeeCard(e.target.checked)} />
-                          Carte employé
+                          Carte
                         </label>
                       </div>
                     </div>
+
+                    <div style={{ marginTop: 10, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                      Remise appliquée: <b style={{ color: 'var(--text)' }}>{discountType}</b> • <b style={{ color: 'var(--primary)' }}>{appliedDiscountPct}%</b>
+                    </div>
                   </div>
 
-                  <div className="ticketBody">
-                    {!cart.length ? (
-                      <div className="muted" style={{ opacity: 0.6, textAlign: 'center', marginTop: 30 }}>
+                  <div className="cart">
+                    {cart.length === 0 ? (
+                      <div style={{ color: 'var(--text-muted)', opacity: 0.7, textAlign: 'center', marginTop: 30 }}>
                         Panier vide
                       </div>
                     ) : (
-                      cart.map((it, idx) => (
-                        <div className="line" key={it.desc}>
+                      cart.map((it) => (
+                        <div className="cart-item" key={it.desc}>
                           <div>
-                            <div style={{ fontWeight: 900, fontSize: '.92rem' }}>{it.desc}</div>
-                            <div className="muted" style={{ fontFamily: 'var(--font-data)' }}>
-                              {meta.currencySymbol}
-                              {it.price.toFixed(2)} × {it.qty}
+                            <div style={{ fontWeight: 900, marginBottom: 4 }}>{it.desc}</div>
+                            <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-data)', fontSize: '0.85rem' }}>
+                              {currencySymbol}{it.pu.toFixed(2)} × {it.qty}
                             </div>
                           </div>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <button className="qtyBtn" onClick={() => modQty(idx, -1)}>
-                              –
-                            </button>
-                            <button className="qtyBtn" onClick={() => modQty(idx, +1)} style={{ borderColor: 'rgba(16,185,129,0.25)' }}>
-                              +
-                            </button>
-                            <button className="qtyBtn" onClick={() => modQty(idx, -999)} style={{ borderColor: 'rgba(239,68,68,0.25)' }}>
-                              🗑
-                            </button>
+                          <div className="cart-actions">
+                            <button className="btn btn-ghost qty-btn" onClick={() => modQty(it.desc, -1)}>-</button>
+                            <button className="btn btn-ghost qty-btn" onClick={() => modQty(it.desc, +1)}>+</button>
+                            <button className="btn btn-danger qty-btn" onClick={() => modQty(it.desc, -999)}>✕</button>
                           </div>
                         </div>
                       ))
                     )}
                   </div>
 
-                  <div className="ticketFoot">
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }} className="muted">
+                  <div className="ticket-foot">
+                    <div className="row">
                       <span>Sous-total</span>
-                      <span style={{ fontFamily: 'var(--font-data)' }}>
-                        {meta.currencySymbol}
-                        {subtotal.toFixed(2)}
-                      </span>
+                      <strong style={{ fontFamily: 'var(--font-data)' }}>{currencySymbol}{subtotal.toFixed(2)}</strong>
                     </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }} className="muted">
-                      <span>Remise ({discountPct}%)</span>
-                      <span style={{ fontFamily: 'var(--font-data)', color: 'var(--success)' }}>
-                        -{meta.currencySymbol}
-                        {discountAmount.toFixed(2)}
-                      </span>
+                    <div className="row">
+                      <span>Remise ({appliedDiscountPct}%)</span>
+                      <strong style={{ fontFamily: 'var(--font-data)', color: 'var(--success)' }}>
+                        -{currencySymbol}{discountAmount.toFixed(2)}
+                      </strong>
                     </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div className="row" style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 10, marginTop: 10 }}>
                       <span style={{ fontWeight: 900, letterSpacing: 1 }}>TOTAL NET</span>
-                      <span style={{ fontWeight: 900, fontSize: '1.3rem', color: 'var(--primary)', fontFamily: 'var(--font-data)' }}>
-                        {meta.currencySymbol}
-                        {total.toFixed(2)}
-                      </span>
+                      <strong style={{ fontFamily: 'var(--font-data)', color: 'var(--primary)', fontSize: '1.2rem' }}>
+                        {currencySymbol}{total.toFixed(2)}
+                      </strong>
                     </div>
 
-                    <button className="btn btn-primary" style={{ width: '100%', marginTop: 12 }} onClick={submitInvoice}>
+                    <button className="btn btn-primary" style={{ width: '100%', marginTop: 12, height: 50 }} onClick={submitInvoice}>
                       ENCAISSER
                     </button>
+
+                    <button className="btn btn-ghost" style={{ width: '100%', marginTop: 10 }} onClick={clearCart}>
+                      Vider Panier
+                    </button>
                   </div>
                 </div>
               </div>
-            )}
+            </section>
+          )}
 
-            {/* DIRECTION */}
-            {tab === 'direction' && (
-              <div style={{ maxWidth: 900, margin: '0 auto' }}>
-                {!adminUnlocked ? (
-                  <div className="card" style={{ borderColor: 'rgba(239,68,68,0.25)', marginTop: 50 }}>
-                    <div style={{ fontWeight: 900, fontSize: '1.4rem', marginBottom: 6 }}>Accès Restreint</div>
-                    <div className="muted" style={{ marginBottom: 16 }}>Authentification Direction Requise</div>
-                    <div style={{ display: 'flex', gap: 10 }}>
-                      <input className="input" placeholder="CODE PIN" value={adminPin} onChange={(e) => setAdminPin(e.target.value)} />
-                      <button
-                        className="btn btn-primary"
-                        style={{ background: 'var(--danger)' }}
-                        onClick={() => {
-                          if (adminPin === ADMIN_CODE) setAdminUnlocked(true);
-                          else notify('PIN', 'Code incorrect', 'error');
-                        }}
-                      >
-                        OK
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', marginBottom: 14 }}>
-                      <div>
-                        <div style={{ fontWeight: 900, fontSize: '1.6rem' }}>Panel de Direction</div>
-                        <div className="muted">RH & Finances (dépenses)</div>
-                      </div>
-                      <button className="btn btn-ghost" onClick={() => { setAdminUnlocked(false); setAdminPin(''); }}>
-                        Verrouiller
-                      </button>
-                    </div>
+          {tab === 'direction' && (
+            <section>
+              {!adminUnlocked ? (
+                <div className="card" style={{ maxWidth: 520, margin: '60px auto', borderColor: 'rgba(239,68,68,0.25)' }}>
+                  <div style={{ fontWeight: 900, fontSize: '1.4rem', marginBottom: 10 }}>Accès Restreint</div>
+                  <div style={{ color: 'var(--text-muted)', marginBottom: 16 }}>Authentification Direction requise</div>
 
-                    <div className="dirGrid">
-                      <div className="miniCard" onClick={() => openHR('recrutement')}>
-                        <div style={{ fontWeight: 900 }}>➕ Recrutement</div>
-                        <div className="muted">Nouveau contrat</div>
-                      </div>
-                      <div className="miniCard" onClick={() => openHR('convocation')}>
-                        <div style={{ fontWeight: 900 }}>📋 Convocation</div>
-                        <div className="muted">Demande RDV</div>
-                      </div>
-                      <div className="miniCard" onClick={() => openHR('avertissement')}>
-                        <div style={{ fontWeight: 900 }}>⚠️ Avertissement</div>
-                        <div className="muted">Sanction</div>
-                      </div>
-                      <div className="miniCard" onClick={() => openHR('licenciement')} style={{ borderColor: 'rgba(239,68,68,0.25)' }}>
-                        <div style={{ fontWeight: 900, color: '#ffb4b4' }}>🔴 Licenciement</div>
-                        <div className="muted">Rupture</div>
-                      </div>
-                      <div className="miniCard" onClick={() => openHR('demission')}>
-                        <div style={{ fontWeight: 900 }}>📝 Démission</div>
-                        <div className="muted">Enregistrer</div>
-                      </div>
-                      <div className="miniCard" onClick={() => openHR('depense')} style={{ gridColumn: 'span 2' }}>
-                        <div style={{ fontWeight: 900 }}>💸 Dépense Entreprise</div>
-                        <div className="muted">Déclaration de frais</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ANNUAIRE */}
-            {tab === 'annuaire' && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', marginBottom: 16 }}>
-                  <div>
-                    <div style={{ fontSize: '1.8rem', fontWeight: 900 }}>Répertoire</div>
-                    <div className="muted">Données depuis `/api` (et onglet “Employés” si présent)</div>
-                  </div>
-                </div>
-
-                <div className="ann">
-                  {(meta.directory || []).map((c, idx) => (
-                    <div className="card" key={idx} style={{ textAlign: 'center' }}>
-                      <img className="avatar" src={c.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'} alt="" />
-                      <div style={{ fontWeight: 900 }}>{c.name}</div>
-                      <div className="muted" style={{ marginBottom: 10, color: 'var(--primary)', fontWeight: 900, textTransform: 'uppercase' }}>
-                        {c.role || 'Employé'}
-                      </div>
-                      <div style={{ fontFamily: 'var(--font-data)', fontWeight: 900, letterSpacing: 1 }}>{c.phone || '—'}</div>
-                      <button
-                        className="btn btn-ghost"
-                        style={{ width: '100%', marginTop: 12 }}
-                        onClick={() => {
-                          const txt = c.phone || '';
-                          navigator.clipboard.writeText(txt);
-                          notify('COPIÉ', `Numéro copié: ${txt}`, 'success');
-                        }}
-                      >
-                        Copier
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* MODAL RH */}
-            {hrModal && (
-              <div className="modalBack" onClick={() => setHrModal(null)}>
-                <div className="card modal" onClick={(e) => e.stopPropagation()}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <div style={{ fontWeight: 900, fontSize: '1.2rem' }}>
-                      RH: {hrModal.type.toUpperCase()}
-                    </div>
-                    <button className="btn btn-ghost" onClick={() => setHrModal(null)}>
-                      ✕
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <input className="input" placeholder="CODE PIN" value={adminPin} onChange={(e) => setAdminPin(e.target.value)} />
+                    <button
+                      className="btn btn-primary"
+                      style={{ background: 'var(--danger)' }}
+                      onClick={() => {
+                        const pinSheet = meta?.ui?.adminPin || '';
+                        if (pinSheet && adminPin === pinSheet) {
+                          setAdminUnlocked(true);
+                          notify('Accès accordé', 'success');
+                        } else {
+                          notify('Code incorrect', 'error');
+                        }
+                      }}
+                    >
+                      OK
                     </button>
                   </div>
 
-                  <div style={{ marginBottom: 10 }}>
-                    <div className="muted" style={{ fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-                      {hrModal.type === 'depense' ? 'Montant ($)' : 'Employé concerné'}
-                    </div>
-                    <input className="input" value={hrTarget} onChange={(e) => setHrTarget(e.target.value)} placeholder={hrModal.type === 'depense' ? 'Ex: 325.75' : 'Nom Prénom'} />
+                  <div style={{ marginTop: 14, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                    *Le PIN est lu depuis l’onglet <b>Config</b> du Sheet (clé: <b>ADMIN_PIN</b>)
                   </div>
-
-                  <div className="grid2" style={{ marginBottom: 10 }}>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', marginBottom: 18 }}>
                     <div>
-                      <div className="muted" style={{ fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-                        Date effective
-                      </div>
-                      <input className="input" type="date" value={hrDate} onChange={(e) => setHrDate(e.target.value)} />
+                      <div style={{ fontSize: '2rem', fontWeight: 900 }}>Panel Direction</div>
+                      <div style={{ color: 'var(--text-muted)' }}>RH + Dépenses (écritures Sheets + Discord)</div>
                     </div>
-
-                    <div>
-                      <div className="muted" style={{ fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-                        Détails (optionnel)
-                      </div>
-                      <input className="input" value={hrDetails} onChange={(e) => setHrDetails(e.target.value)} placeholder={hrModal.type === 'depense' ? 'Fournisseur / Entreprise' : 'Infos supplémentaires'} />
-                    </div>
+                    <button className="btn btn-ghost" onClick={() => { setAdminUnlocked(false); setAdminPin(''); }}>
+                      Verrouiller
+                    </button>
                   </div>
 
-                  <div style={{ marginBottom: 12 }}>
-                    <div className="muted" style={{ fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-                      Motif / Description
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
+                    <div className="widget" onClick={() => openHR('recrutement')}><div style={{ fontWeight: 900 }}>➕ Recrutement</div><div style={{ color: 'var(--text-muted)' }}>Nouveau contrat</div></div>
+                    <div className="widget" onClick={() => openHR('convocation')}><div style={{ fontWeight: 900 }}>📋 Convocation</div><div style={{ color: 'var(--text-muted)' }}>Demande RDV</div></div>
+                    <div className="widget" onClick={() => openHR('avertissement')}><div style={{ fontWeight: 900 }}>⚠️ Avertissement</div><div style={{ color: 'var(--text-muted)' }}>Sanction</div></div>
+                    <div className="widget" onClick={() => openHR('licenciement')}><div style={{ fontWeight: 900, color: '#fca5a5' }}>🔴 Licenciement</div><div style={{ color: 'var(--text-muted)' }}>Rupture</div></div>
+                    <div className="widget" onClick={() => openHR('demission')}><div style={{ fontWeight: 900 }}>📝 Démission</div><div style={{ color: 'var(--text-muted)' }}>Enregistrement</div></div>
+                    <div className="widget" style={{ gridColumn: 'span 2' }} onClick={() => openHR('depense')}>
+                      <div style={{ fontWeight: 900, color: '#86efac' }}>💸 Dépense Entreprise</div>
+                      <div style={{ color: 'var(--text-muted)' }}>Déclaration de frais</div>
                     </div>
-                    <textarea className="input" rows={4} value={hrReason} onChange={(e) => setHrReason(e.target.value)} placeholder="Détails du dossier..." />
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {tab === 'annuaire' && (
+            <section>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', marginBottom: 18 }}>
+                <div>
+                  <div style={{ fontSize: '2rem', fontWeight: 900 }}>Répertoire</div>
+                  <div style={{ color: 'var(--text-muted)' }}>Données récupérées depuis Google Sheets</div>
+                </div>
+                <button className="btn btn-ghost" onClick={loadMeta}>Sync</button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
+                {(meta?.directory || []).map((c) => (
+                  <div key={c.name} className="card" style={{ padding: 18, textAlign: 'center' }}>
+                    <img
+                      src={c.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'}
+                      style={{ width: 74, height: 74, borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.12)', marginBottom: 10 }}
+                    />
+                    <div style={{ fontWeight: 900 }}>{c.name}</div>
+                    <div style={{ color: 'var(--primary)', fontWeight: 900, fontSize: '0.8rem', marginTop: 4 }}>{c.role || '—'}</div>
+                    <div style={{ fontFamily: 'var(--font-data)', color: 'var(--text-muted)', marginTop: 8 }}>{c.phone || '—'}</div>
+
+                    <button
+                      className="btn btn-ghost"
+                      style={{ width: '100%', marginTop: 12 }}
+                      onClick={async () => {
+                        if (!c.phone) return notify('Numéro manquant', 'error');
+                        await navigator.clipboard.writeText(c.phone);
+                        notify('Numéro copié', 'success');
+                      }}
+                    >
+                      Copier
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* MODAL RH */}
+          {hrModal && (
+            <div className="modal" onClick={() => setHrModal(null)}>
+              <div className="card" style={{ width: 520, maxWidth: '95vw' }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                  <div style={{ fontWeight: 900, fontSize: '1.2rem' }}>{hrModal.title}</div>
+                  <button className="btn btn-ghost" onClick={() => setHrModal(null)}>Fermer</button>
+                </div>
+
+                <div style={{ display: 'grid', gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 900, marginBottom: 6 }}>
+                      {hrModal.targetLabel}
+                    </div>
+                    <input
+                      className="input"
+                      placeholder={hrModal.type === 'depense' ? 'ex: 325.75' : 'Nom Prénom'}
+                      value={hrTarget}
+                      onChange={(e) => setHrTarget(e.target.value)}
+                    />
                   </div>
 
-                  <button className="btn btn-primary" style={{ width: '100%' }} onClick={submitHR}>
-                    Confirmer l’envoi
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 900, marginBottom: 6 }}>
+                      DATE EFFECTIVE
+                    </div>
+                    <input className="input" type="date" value={hrDate} onChange={(e) => setHrDate(e.target.value)} />
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 900, marginBottom: 6 }}>
+                      MOTIF / DESCRIPTION
+                    </div>
+                    <textarea className="input" rows={4} value={hrReason} onChange={(e) => setHrReason(e.target.value)} />
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 900, marginBottom: 6 }}>
+                      {hrModal.type === 'depense' ? 'ENTREPRISE / FOURNISSEUR' : 'DÉTAILS (optionnel)'}
+                    </div>
+                    <input className="input" value={hrDetails} onChange={(e) => setHrDetails(e.target.value)} />
+                  </div>
+
+                  <button className="btn btn-primary" style={{ width: '100%', height: 50 }} onClick={submitHR}>
+                    Confirmer l'envoi
                   </button>
                 </div>
               </div>
-            )}
-          </>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }
