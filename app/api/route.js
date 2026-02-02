@@ -2,57 +2,84 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { google } from "googleapis";
 import { NextResponse } from "next/server";
+import { google } from "googleapis";
 
-// =====================
-// ENV (SECRETS)
-// =====================
-const SHEET_ID = cleanEnv(process.env.GOOGLE_SHEET_ID);
-const CLIENT_EMAIL = cleanEnv(process.env.GOOGLE_CLIENT_EMAIL);
-const PRIVATE_KEY = (cleanEnv(process.env.GOOGLE_PRIVATE_KEY) || "").replace(/\\n/g, "\n");
+/* ----------------------------- ENV / CONFIG ----------------------------- */
 
-// Discord Webhooks (NE PAS METTRE EN DUR)
+const env = (k) => String(process.env[k] || "").trim().replace(/^['"]|['"]$/g, "");
+const SHEET_ID = env("GOOGLE_SHEET_ID");
+const CLIENT_EMAIL = env("GOOGLE_CLIENT_EMAIL");
+const PRIVATE_KEY = env("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n");
+
 const WEBHOOKS = {
-  FACTURATION: cleanEnv(process.env.WEBHOOK_FACTURATION),
-  CONVOCATION: cleanEnv(process.env.WEBHOOK_CONVOCATION),
-  AVERTISSEMENT: cleanEnv(process.env.WEBHOOK_AVERTISSEMENT),
-  LICENCIEMENT: cleanEnv(process.env.WEBHOOK_LICENCIEMENT),
-  DEMISSION: cleanEnv(process.env.WEBHOOK_DEMISSION),
-  RECRUTEMENT: cleanEnv(process.env.WEBHOOK_RECRUTEMENT),
-  DEPENSE: cleanEnv(process.env.WEBHOOK_DEPENSE),
+  FACTURATION: env("WEBHOOK_FACTURATION"),
+  CONVOCATION: env("WEBHOOK_CONVOCATION"),
+  AVERTISSEMENT: env("WEBHOOK_AVERTISSEMENT"),
+  LICENCIEMENT: env("WEBHOOK_LICENCIEMENT"),
+  DEMISSION: env("WEBHOOK_DEMISSION"),
+  RECRUTEMENT: env("WEBHOOK_RECRUTEMENT"),
+  DEPENSE: env("WEBHOOK_DEPENSE"),
 };
 
-// =====================
-// HELPERS
-// =====================
-function cleanEnv(v) {
-  return (v || "").trim().replace(/^['"]|['"]$/g, "");
-}
+/* ----------------------------- SMALL HELPERS ---------------------------- */
 
-function normHeader(s) {
-  return String(s || "")
+const normHeader = (s) =>
+  String(s || "")
     .trim()
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
-}
 
-function toNumber(v) {
+const toNumber = (v) => {
   if (v === null || v === undefined) return 0;
   const s = String(v).replace("$", "").replace(",", ".").trim();
   const n = Number(s);
   return Number.isFinite(n) ? n : 0;
-}
+};
 
-function toBool(v) {
+const toBool = (v) => {
   const s = String(v ?? "").trim().toLowerCase();
   return s === "1" || s === "true" || s === "oui" || s === "yes";
+};
+
+const todayFR = () => new Date().toLocaleDateString("fr-FR");
+const isoNow = () => new Date().toISOString();
+const makeDepenseId = () => `DEP-${String(Math.floor(Date.now() / 1000)).slice(-6)}`;
+
+async function readJson(req) {
+  try {
+    return await req.json();
+  } catch {
+    return {};
+  }
 }
 
-async function getAuthSheets() {
+function ok(data) {
+  return NextResponse.json({ success: true, ...data });
+}
+function bad(message, status = 400) {
+  return NextResponse.json({ success: false, error: message }, { status });
+}
+
+async function sendDiscordWebhook(url, payload) {
+  if (!url) return;
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    console.error("Discord webhook error:", e?.message || e);
+  }
+}
+
+/* ------------------------------ SHEETS AUTH ----------------------------- */
+
+async function getSheets() {
   if (!SHEET_ID || !CLIENT_EMAIL || !PRIVATE_KEY) {
     throw new Error("ENV manquantes: GOOGLE_SHEET_ID / GOOGLE_CLIENT_EMAIL / GOOGLE_PRIVATE_KEY");
   }
@@ -66,14 +93,14 @@ async function getAuthSheets() {
 
 async function tryGetValues(sheets, ranges) {
   let lastErr = null;
-  for (const r of ranges) {
+  for (const range of ranges) {
     try {
       const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SHEET_ID,
-        range: r,
+        range,
         valueRenderOption: "UNFORMATTED_VALUE",
       });
-      return { range: r, values: res.data.values || [] };
+      return res.data.values || [];
     } catch (e) {
       lastErr = e;
     }
@@ -83,158 +110,20 @@ async function tryGetValues(sheets, ranges) {
 
 function tableFrom(values) {
   const rows = values || [];
-  if (rows.length < 2) return { headers: [], items: [] };
+  if (rows.length < 2) return [];
 
-  const headersRaw = rows[0].map((h) => normHeader(h));
+  const headers = rows[0].map(normHeader);
   const items = [];
 
   for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    if (!row || row.length === 0) continue;
-
+    const row = rows[i] || [];
     const obj = {};
-    headersRaw.forEach((h, idx) => {
-      obj[h] = row[idx];
-    });
-
+    headers.forEach((h, idx) => (obj[h] = row[idx]));
     const hasAny = Object.values(obj).some((x) => String(x ?? "").trim() !== "");
     if (hasAny) items.push(obj);
   }
 
-  return { headers: headersRaw, items };
-}
-
-async function sendDiscordWebhook(url, payload) {
-  if (!url) return;
-
-  try {
-    await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-  } catch (e) {
-    console.error("Discord webhook error:", e);
-  }
-}
-
-function todayFR() {
-  return new Date().toLocaleDateString("fr-FR");
-}
-
-function isoNow() {
-  return new Date().toISOString();
-}
-
-function makeDepenseId() {
-  const ts = Math.floor(Date.now() / 1000);
-  return `DEP-${String(ts).slice(-6)}`;
-}
-
-// =====================
-// SHEET LOADERS (DATA FROM SHEET)
-// =====================
-async function loadConfig(sheets) {
-  // Onglet conseillé: Config (A=key, B=value)
-  const { values } = await tryGetValues(sheets, [
-    `'Config'!A1:B200`,
-    `'CONFIG'!A1:B200`,
-    `'Parametres'!A1:B200`,
-    `'Paramètres'!A1:B200`,
-  ]);
-
-  const map = {};
-
-  // Mode robuste: parse lignes A/B, avec ou sans header
-  for (let i = 0; i < values.length; i++) {
-    const a = String(values[i]?.[0] ?? "").trim();
-    const b = String(values[i]?.[1] ?? "").trim();
-
-    // ignore ligne vide
-    if (!a && !b) continue;
-
-    // ignore header si présent
-    if (i === 0 && normHeader(a) === "key" && normHeader(b) === "value") continue;
-
-    if (a) map[a] = b;
-  }
-
-  return {
-    appVersion: map.APP_VERSION || "",
-    currencySymbol: map.CURRENCY_SYMBOL || "$",
-    currencyCode: map.CURRENCY_CODE || "USD",
-    adminPin: map.ADMIN_PIN || "",
-    usernameDiscord: map.DISCORD_USERNAME || "Secretaire Vespucci",
-    avatarDiscord: map.DISCORD_AVATAR_URL || "",
-  };
-}
-
-async function loadEmployees(sheets) {
-  // Onglet conseillé: Employés
-  const { values } = await tryGetValues(sheets, [
-    `'Employés'!A1:Z2000`,
-    `'Employes'!A1:Z2000`,
-    `'Employees'!A1:Z2000`,
-  ]);
-
-  const { items } = tableFrom(values);
-
-  const out = items
-    .map((r) => ({
-      name: String(r.name ?? r.nom ?? r.prenom_nom ?? "").trim(),
-      role: String(r.role ?? r.poste ?? "").trim(),
-      discount: toNumber(r.discount ?? r.remise ?? r.reduction ?? 0),
-      phone: String(r.phone ?? r.tel ?? r.telephone ?? "").trim(),
-      avatar: String(r.avatar ?? r.photo ?? r.image ?? "").trim(),
-    }))
-    .filter((e) => e.name);
-
-  out.sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
-  return out;
-}
-
-async function loadCatalogue(sheets) {
-  // Onglet conseillé: Catalogue
-  const { values } = await tryGetValues(sheets, [
-    `'Catalogue'!A1:Z5000`,
-    `'CATALOGUE'!A1:Z5000`,
-    `'Produits'!A1:Z5000`,
-  ]);
-
-  const { items } = tableFrom(values);
-
-  const rows = items
-    .map((r) => ({
-      category: String(r.category ?? r.categorie ?? r.cat ?? "").trim(),
-      product: String(r.product ?? r.produit ?? r.name ?? "").trim(),
-      price: toNumber(r.price ?? r.prix ?? r.pu ?? 0),
-    }))
-    .filter((x) => x.category && x.product);
-
-  return rows;
-}
-
-async function loadEnterprises(sheets) {
-  // Onglet conseillé: Entreprises
-  const { values } = await tryGetValues(sheets, [
-    `'Entreprises'!A1:Z2000`,
-    `'Enterprises'!A1:Z2000`,
-    `'Partenaires'!A1:Z2000`,
-  ]);
-
-  const { items } = tableFrom(values);
-
-  const rows = items
-    .map((r) => ({
-      name: String(r.name ?? r.entreprise ?? r.partner ?? "").trim(),
-      discount: toNumber(r.discount ?? r.remise ?? r.reduction ?? 0),
-      phone: String(r.phone ?? r.tel ?? r.telephone ?? "").trim(),
-      image: String(r.image ?? r.avatar ?? r.photo ?? "").trim(),
-    }))
-    .filter((x) => x.name);
-
-  rows.sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
-  return rows;
+  return items;
 }
 
 async function ensureHeadersIfEmpty(sheets, sheetName, headers) {
@@ -248,7 +137,7 @@ async function ensureHeadersIfEmpty(sheets, sheetName, headers) {
   const hasAny = firstRow.some((x) => String(x ?? "").trim() !== "");
   if (hasAny) return;
 
-  const endCol = String.fromCharCode(64 + headers.length); // A..Z (si >26 colonnes, adapte)
+  const endCol = String.fromCharCode(64 + headers.length); // A..Z
   await sheets.spreadsheets.values.update({
     spreadsheetId: SHEET_ID,
     range: `'${sheetName}'!A1:${endCol}1`,
@@ -257,9 +146,100 @@ async function ensureHeadersIfEmpty(sheets, sheetName, headers) {
   });
 }
 
-// =====================
-// META (equiv Apps Script getAppMeta)
-// =====================
+/* ---------------------------- DATA LOADERS ----------------------------- */
+
+async function loadConfig(sheets) {
+  const values = await tryGetValues(sheets, [
+    `'Config'!A1:B250`,
+    `'CONFIG'!A1:B250`,
+    `'Parametres'!A1:B250`,
+    `'Paramètres'!A1:B250`,
+  ]);
+
+  const map = {};
+  for (let i = 0; i < values.length; i++) {
+    const a = String(values[i]?.[0] ?? "").trim();
+    const b = String(values[i]?.[1] ?? "").trim();
+    if (!a && !b) continue;
+    if (i === 0 && normHeader(a) === "key" && normHeader(b) === "value") continue;
+    if (a) map[a] = b;
+  }
+
+  return {
+    appVersion: map.APP_VERSION || "",
+    currencySymbol: map.CURRENCY_SYMBOL || "$",
+    currencyCode: map.CURRENCY_CODE || "USD",
+    adminPin: map.ADMIN_PIN || "",
+    discordUsername: map.DISCORD_USERNAME || "Secretaire Vespucci",
+    discordAvatarUrl: map.DISCORD_AVATAR_URL || "",
+  };
+}
+
+async function loadEmployees(sheets) {
+  const values = await tryGetValues(sheets, [
+    `'Employés'!A1:Z5000`,
+    `'Employes'!A1:Z5000`,
+    `'Employees'!A1:Z5000`,
+  ]);
+
+  const rows = tableFrom(values);
+
+  const employees = rows
+    .map((r) => ({
+      name: String(r.name ?? r.nom ?? r.prenom_nom ?? "").trim(),
+      role: String(r.role ?? r.poste ?? "").trim(),
+      discount: toNumber(r.discount ?? r.remise ?? r.reduction ?? 0),
+      phone: String(r.phone ?? r.tel ?? r.telephone ?? "").trim(),
+      avatar: String(r.avatar ?? r.photo ?? r.image ?? "").trim(),
+    }))
+    .filter((e) => e.name);
+
+  employees.sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
+  return employees;
+}
+
+async function loadCatalogue(sheets) {
+  const values = await tryGetValues(sheets, [
+    `'Catalogue'!A1:Z9999`,
+    `'CATALOGUE'!A1:Z9999`,
+    `'Produits'!A1:Z9999`,
+  ]);
+
+  const rows = tableFrom(values);
+
+  return rows
+    .map((r) => ({
+      category: String(r.category ?? r.categorie ?? r.cat ?? "").trim(),
+      product: String(r.product ?? r.produit ?? r.name ?? "").trim(),
+      price: toNumber(r.price ?? r.prix ?? r.pu ?? 0),
+    }))
+    .filter((x) => x.category && x.product);
+}
+
+async function loadEnterprises(sheets) {
+  const values = await tryGetValues(sheets, [
+    `'Entreprises'!A1:Z5000`,
+    `'Enterprises'!A1:Z5000`,
+    `'Partenaires'!A1:Z5000`,
+  ]);
+
+  const rows = tableFrom(values);
+
+  const enterprises = rows
+    .map((r) => ({
+      name: String(r.name ?? r.entreprise ?? r.partner ?? "").trim(),
+      discount: toNumber(r.discount ?? r.remise ?? r.reduction ?? 0),
+      phone: String(r.phone ?? r.tel ?? r.telephone ?? "").trim(),
+      image: String(r.image ?? r.avatar ?? r.photo ?? "").trim(),
+    }))
+    .filter((x) => x.name);
+
+  enterprises.sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
+  return enterprises;
+}
+
+/* ------------------------------ META BUILD ------------------------------ */
+
 async function buildMeta(sheets) {
   const config = await loadConfig(sheets);
   const employeesFull = await loadEmployees(sheets);
@@ -267,16 +247,16 @@ async function buildMeta(sheets) {
   const enterprisesRows = await loadEnterprises(sheets);
 
   const employeeDiscounts = {};
-  for (const e of employeesFull) {
-    employeeDiscounts[e.name] = { role: e.role, discount: e.discount };
-  }
-
   const directory = employeesFull.map((e) => ({
     name: e.name,
     role: e.role,
     avatar: e.avatar,
     phone: e.phone,
   }));
+
+  for (const e of employeesFull) {
+    employeeDiscounts[e.name] = { role: e.role, discount: e.discount };
+  }
 
   const productsByCategory = {};
   const prices = {};
@@ -286,34 +266,35 @@ async function buildMeta(sheets) {
     prices[p.product] = p.price;
   }
 
-  const products = Object.values(productsByCategory).flat();
-
   const enterprises = {};
   for (const ent of enterprisesRows) {
     enterprises[ent.name] = { discount: ent.discount, phone: ent.phone, image: ent.image };
   }
 
+  const products = Object.values(productsByCategory).flat();
+
   return {
     version: config.appVersion || "unknown",
-    serverTime: new Date().toISOString(),
+    serverTime: isoNow(),
+    currencySymbol: config.currencySymbol,
+    currencyCode: config.currencyCode,
+
     employees: employeesFull.map((e) => e.name),
     directory,
     employeeDiscounts,
+
     products,
     productsByCategory,
     prices,
     enterprises,
-    currencySymbol: config.currencySymbol,
-    currencyCode: config.currencyCode,
-    totals: {
-      employees: employeesFull.length,
-      products: products.length,
-    },
+
+    totals: { employees: employeesFull.length, products: products.length },
+
+    // ⚠️ si tu ne veux PAS exposer le PIN au client, enlève adminPin ici
     ui: {
-      // ⚠️ Si tu ne veux PAS envoyer le PIN au client, supprime adminPin ici
       adminPin: config.adminPin,
-      discordUsername: config.usernameDiscord,
-      discordAvatarUrl: config.avatarDiscord,
+      discordUsername: config.discordUsername,
+      discordAvatarUrl: config.discordAvatarUrl,
     },
   };
 }
@@ -343,28 +324,25 @@ function calcInvoiceTotals({ items, prices, discountActivated, enterpriseName, e
   return { subtotal, discountPct, discountAmount, total, discountType };
 }
 
-// =====================
-// API
-// =====================
+/* --------------------------------- API --------------------------------- */
+
 export async function POST(request) {
   try {
-    const body = await request.json().catch(() => ({}));
-    const action = body?.action || "getMeta";
+    const body = await readJson(request);
+    const action = String(body?.action || "getMeta");
     const data = body?.data || {};
 
-    const sheets = await getAuthSheets();
+    const sheets = await getSheets();
 
     if (action === "getMeta") {
       const meta = await buildMeta(sheets);
-      return NextResponse.json({ success: true, ...meta });
+      return ok(meta);
     }
 
-    // charge meta (prix, entreprises, etc.)
+    // (Tout le reste a besoin de la meta)
     const meta = await buildMeta(sheets);
 
-    // =====================
-    // sendFactures
-    // =====================
+    /* ------------------------------- FACTURES ------------------------------ */
     if (action === "sendFactures") {
       const employee = String(data.employee || "").trim();
       const invoiceNumber = String(data.invoiceNumber || "").trim();
@@ -373,29 +351,25 @@ export async function POST(request) {
       const employeeCard = toBool(data.employeeCard);
       const discountActivated = toBool(data.discountActivated);
 
-      if (!employee || !meta.employees.includes(employee)) {
-        return NextResponse.json({ success: false, error: "Employé invalide" }, { status: 400 });
-      }
-      if (!invoiceNumber || invoiceNumber.length < 3 || invoiceNumber.length > 40) {
-        return NextResponse.json({ success: false, error: "Numéro facture invalide" }, { status: 400 });
-      }
+      if (!employee || !meta.employees.includes(employee)) return bad("Employé invalide");
+      if (!invoiceNumber || invoiceNumber.length < 3 || invoiceNumber.length > 40) return bad("Numéro facture invalide");
 
       const rawItems = Array.isArray(data.items) ? data.items : [];
       const items = rawItems
-        .map((i) => ({ desc: String(i.desc ?? i.name ?? "").trim(), qty: Math.floor(Number(i.qty ?? i.q ?? 0)) }))
+        .map((i) => ({
+          desc: String(i.desc ?? i.name ?? "").trim(),
+          qty: Math.floor(Number(i.qty ?? i.q ?? 0)),
+        }))
         .filter((i) => i.desc && i.qty > 0);
 
-      if (items.length === 0) {
-        return NextResponse.json({ success: false, error: "Aucun article" }, { status: 400 });
-      }
+      if (items.length === 0) return bad("Aucun article");
 
       for (const it of items) {
-        if (!(it.desc in meta.prices)) {
-          return NextResponse.json({ success: false, error: `Produit invalide: ${it.desc}` }, { status: 400 });
-        }
+        if (!(it.desc in meta.prices)) return bad(`Produit invalide: ${it.desc}`);
       }
 
       const employeeDiscountPct = meta.employeeDiscounts?.[employee]?.discount ?? 0;
+      const role = meta.employeeDiscounts?.[employee]?.role || "";
 
       const totals = calcInvoiceTotals({
         items,
@@ -406,7 +380,6 @@ export async function POST(request) {
         employeeDiscountPct,
       });
 
-      const role = meta.employeeDiscounts?.[employee]?.role || "";
       const itemsDetails = items.map((i) => `${i.desc} (×${i.qty})`).join("; ");
 
       await ensureHeadersIfEmpty(sheets, "Factures", [
@@ -461,7 +434,7 @@ export async function POST(request) {
           {
             title: `🧾 Facture N°${invoiceNumber}`,
             description: `**Nouvelle facture générée - Esthétique Vespucci**`,
-            color: 0x0000ff,
+            color: 0x00b3ff,
             fields: [
               {
                 name: "📋 Informations Générales",
@@ -501,8 +474,7 @@ export async function POST(request) {
         ],
       });
 
-      return NextResponse.json({
-        success: true,
+      return ok({
         subtotal: totals.subtotal,
         discountPct: totals.discountPct,
         discountType: totals.discountType,
@@ -511,9 +483,7 @@ export async function POST(request) {
       });
     }
 
-    // =====================
-    // sendHR (RH + depense)
-    // =====================
+    /* ---------------------------------- RH --------------------------------- */
     if (action === "sendHR") {
       const type = String(data.type || "").trim().toLowerCase();
       const initiatedBy = String(data.initiatedBy || data.employee || "").trim();
@@ -521,20 +491,13 @@ export async function POST(request) {
       const date = String(data.date || "").trim();
       const details = String(data.details || "").trim();
 
-      if (!type || !initiatedBy || !reason || !date) {
-        return NextResponse.json({ success: false, error: "Données incomplètes" }, { status: 400 });
-      }
-
-      if (!meta.employees.includes(initiatedBy)) {
-        return NextResponse.json({ success: false, error: "Auteur invalide" }, { status: 400 });
-      }
+      if (!type || !initiatedBy || !reason || !date) return bad("Données incomplètes");
+      if (!meta.employees.includes(initiatedBy)) return bad("Auteur invalide");
 
       // DEPENSE
       if (type === "depense") {
-        const amount = toNumber(data.amount ?? data.employee ?? 0);
-        if (amount <= 0) {
-          return NextResponse.json({ success: false, error: "Montant invalide" }, { status: 400 });
-        }
+        const amount = toNumber(data.amount ?? 0);
+        if (amount <= 0) return bad("Montant invalide");
 
         const role = meta.employeeDiscounts?.[initiatedBy]?.role || "Employé";
         const idFacture = makeDepenseId();
@@ -577,7 +540,7 @@ export async function POST(request) {
             {
               title: "💸 Déclaration de Dépense",
               description: "Nouvelle dépense entreprise",
-              color: 0x1abc9c,
+              color: 0x20c997,
               fields: [
                 { name: "💰 Montant", value: `**${meta.currencySymbol}${amount.toFixed(2)}**`, inline: true },
                 { name: "📅 Date effective", value: new Date(date).toLocaleDateString("fr-FR"), inline: true },
@@ -591,14 +554,12 @@ export async function POST(request) {
           ],
         });
 
-        return NextResponse.json({ success: true });
+        return ok({});
       }
 
       // RH CLASSIQUE
       const employeeTarget = String(data.employeeTarget || data.employee || "").trim();
-      if (!employeeTarget) {
-        return NextResponse.json({ success: false, error: "Employé concerné manquant" }, { status: 400 });
-      }
+      if (!employeeTarget) return bad("Employé concerné manquant");
 
       await ensureHeadersIfEmpty(sheets, "RH", [
         "Date",
@@ -648,9 +609,8 @@ export async function POST(request) {
       };
 
       const t = titles[type] || { title: "Action RH", color: 0x777777, desc: "Action RH" };
-      const wh = webhookMap[type];
 
-      await sendDiscordWebhook(wh, {
+      await sendDiscordWebhook(webhookMap[type], {
         username: "Vespucci Direction",
         avatar_url: meta.ui?.discordAvatarUrl || undefined,
         embeds: [
@@ -671,15 +631,12 @@ export async function POST(request) {
         ],
       });
 
-      return NextResponse.json({ success: true });
+      return ok({});
     }
 
-    return NextResponse.json({ success: false, error: "Action inconnue" }, { status: 400 });
+    return bad("Action inconnue", 400);
   } catch (err) {
     console.error("API error:", err?.message || err);
-    return NextResponse.json(
-      { success: false, error: err?.message || String(err) },
-      { status: 500 }
-    );
+    return bad(err?.message || String(err), 500);
   }
 }
