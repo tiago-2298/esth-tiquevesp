@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSheetData, RANGES } from '@/lib/google'; // On importe la logique depuis ton fichier lib
+import { getSheetData, RANGES } from '../lib/google'; // On importe la logique depuis ton fichier lib
 
 // --- FONCTION PRINCIPALE (POST) ---
 export async function POST(req) {
@@ -199,3 +199,4 @@ export async function POST(req) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
