@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #06b6d4;
+  --bg-deep: #0f0f1a;
+  --bg-panel: rgba(20, 25, 45, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --text: #f1f5f9;
+}
+
+body {
+  background-color: var(--bg-deep);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  /* Fond Quadrillage */
+  background-image: 
+    radial-gradient(circle at 50% 10%, #1e1e3f 0%, #05050a 100%),
+    linear-gradient(45deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 100% 100%, 40px 40px, 40px 40px;
+  background-attachment: fixed;
+}
+
+/* Utilitaires "Verre" pour Tailwind */
+.glass-card {
+  @apply bg-[var(--bg-panel)] backdrop-blur-xl border border-[var(--glass-border)] rounded-2xl shadow-2xl;
+}
+.titanium-input {
+  @apply w-full p-3 rounded-xl bg-black/40 border border-white/10 text-white focus:border-cyan-500 focus:outline-none transition-all;
+}
