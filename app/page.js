@@ -5,36 +5,14 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 // --- CONFIGURATION CLIENT ---
 const CONFIG = {
   logoUrl: "https://i.goopics.net/rdaufk.png", 
-  
   products: [
-    { 
-      id: 'Tête', icon: 'ri-user-3-fill', color: '#06b6d4', 
-      items: [{n:'Petit Tatouage', p:350}, {n:'Moyen Tatouage', p:450}, {n:'Grand Tatouage', p:600}, {n:'Tatouage Visage', p:700}] 
-    },
-    { 
-      id: 'Torse/Dos', icon: 'ri-body-scan-fill', color: '#f59e0b', 
-      items: [{n:'Petit Tatouage', p:600}, {n:'Moyen Tatouage', p:800}, {n:'Grand Tatouage', p:1100}, {n:'Dos Complet', p:3000}] 
-    },
-    { 
-      id: 'Bras', icon: 'ri-markup-fill', color: '#8b5cf6', 
-      items: [{n:'Petit Tatouage', p:450}, {n:'Moyen Tatouage', p:600}, {n:'Grand Tatouage', p:800}, {n:'Bras Complet', p:2500}] 
-    },
-    { 
-      id: 'Jambes', icon: 'ri-walk-fill', color: '#10b981', 
-      items: [{n:'Petit Tatouage', p:450}, {n:'Moyen Tatouage', p:600}, {n:'Grand Tatouage', p:800}, {n:'Jambe Complète', p:2500}] 
-    },
-    { 
-      id: 'Custom', icon: 'ri-edit-2-fill', color: '#94a3b8', 
-      items: [{n:'Retouche', p:100}, {n:'Custom Small', p:500}, {n:'Custom Large', p:1500}, {n:'Projet Spécial', p:5000}] 
-    },
-    { 
-      id: 'Laser', icon: 'ri-flashlight-fill', color: '#ef4444', 
-      items: [{n:'Petit Laser', p:250}, {n:'Moyen Laser', p:500}, {n:'Grand Laser', p:750}, {n:'Séance Complète', p:1000}] 
-    },
-    { 
-      id: 'Coiffeur', icon: 'ri-scissors-fill', color: '#ec4899', 
-      items: [{n:'Coupe', p:200}, {n:'Couleur', p:100}, {n:'Barbe', p:100}, {n:'Dégradé', p:100}] 
-    }
+    { id: 'Tête', icon: 'ri-user-3-fill', color: '#06b6d4', items: [{n:'Petit Tatouage', p:350}, {n:'Moyen Tatouage', p:450}, {n:'Grand Tatouage', p:600}, {n:'Tatouage Visage', p:700}] },
+    { id: 'Torse/Dos', icon: 'ri-body-scan-fill', color: '#f59e0b', items: [{n:'Petit Tatouage', p:600}, {n:'Moyen Tatouage', p:800}, {n:'Grand Tatouage', p:1100}, {n:'Dos Complet', p:3000}] },
+    { id: 'Bras', icon: 'ri-markup-fill', color: '#8b5cf6', items: [{n:'Petit Tatouage', p:450}, {n:'Moyen Tatouage', p:600}, {n:'Grand Tatouage', p:800}, {n:'Bras Complet', p:2500}] },
+    { id: 'Jambes', icon: 'ri-walk-fill', color: '#10b981', items: [{n:'Petit Tatouage', p:450}, {n:'Moyen Tatouage', p:600}, {n:'Grand Tatouage', p:800}, {n:'Jambe Complète', p:2500}] },
+    { id: 'Custom', icon: 'ri-edit-2-fill', color: '#94a3b8', items: [{n:'Retouche', p:100}, {n:'Custom Small', p:500}, {n:'Custom Large', p:1500}, {n:'Projet Spécial', p:5000}] },
+    { id: 'Laser', icon: 'ri-flashlight-fill', color: '#ef4444', items: [{n:'Petit Laser', p:250}, {n:'Moyen Laser', p:500}, {n:'Grand Laser', p:750}, {n:'Séance Complète', p:1000}] },
+    { id: 'Coiffeur', icon: 'ri-scissors-fill', color: '#ec4899', items: [{n:'Coupe', p:200}, {n:'Couleur', p:100}, {n:'Barbe', p:100}, {n:'Dégradé', p:100}] }
   ],
   partners: [
     {name:'HenHouse', val:30}, {name:'Auto Exotic', val:30}, {name:'LifeInvader', val:30},
@@ -45,26 +23,17 @@ const CONFIG = {
   ]
 };
 
-// --- UTILITAIRES ---
-const formatMoney = (amount) => {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(amount);
-};
+const formatMoney = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(amount);
 
 const apiCall = async (action, data) => {
     try {
         const res = await fetch('/api', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action, data })
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, data })
         });
         return await res.json();
-    } catch (e) {
-        console.error("API Error", e);
-        return { success: false };
-    }
+    } catch (e) { console.error("API Error", e); return { success: false }; }
 };
 
-// --- ICONS ---
 const Icons = {
   Dashboard: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>,
   Cart: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>,
@@ -79,7 +48,6 @@ const Icons = {
   User: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
 };
 
-// --- HOOKS ---
 const useCart = (user, discountVal) => {
   const [cart, setCart] = useState([]);
   const addToCart = (product) => {
@@ -107,7 +75,6 @@ const useCart = (user, discountVal) => {
   return { cart, addToCart, updateQty, clearCart, totals };
 };
 
-// --- COMPONENTS ---
 const Toast = ({ toast }) => {
   if (!toast) return null;
   return (
@@ -121,7 +88,6 @@ const Toast = ({ toast }) => {
 // --- LOGIN VIEW ---
 const LoginView = ({ employees, onLogin, isLoadingList }) => {
   const [selectedUser, setSelectedUser] = useState('');
-
   return (
     <div className="login-container">
       <div className="login-content-wrapper">
@@ -132,7 +98,6 @@ const LoginView = ({ employees, onLogin, isLoadingList }) => {
             <h1>VESPUCCI</h1>
             <p>ESTHETIC & INK • MANAGER</p>
         </div>
-        
         <div className="login-form">
           <div className="select-container">
             <select value={selectedUser} onChange={e => setSelectedUser(e.target.value)} disabled={isLoadingList}>
@@ -162,21 +127,17 @@ export default function VespucciInk() {
   const [user, setUser] = useState('');
   const [userProfile, setUserProfile] = useState(null);
   const [userHistory, setUserHistory] = useState([]);
-
-  // Invoice States
   const [invoiceNumber, setInvoiceNumber] = useState(''); 
   const [discountVal, setDiscountVal] = useState(0); 
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState(null); 
   
-  // Admin States
+  // Admin & Dir
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminPin, setAdminPin] = useState('');
   const [shakeError, setShakeError] = useState(false);
   const [successUnlock, setSuccessUnlock] = useState(false);
   const [directory, setDirectory] = useState([]);
-  
-  // Modals
   const [addContactModal, setAddContactModal] = useState(false);
   const [newContact, setNewContact] = useState({ nom: '', prenom: '', grade: 'Employé', tel: '', photo: '' });
   const [activeAdminModal, setActiveAdminModal] = useState(null); 
@@ -189,22 +150,20 @@ export default function VespucciInk() {
     setTimeout(() => setToast(null), 4000);
   }, []);
 
-  // 1. CHARGEMENT INITIAL (Avec chargement de l'annuaire depuis le Sheet)
+  // INIT APP
   useEffect(() => {
     const initApp = async () => {
-        // Fallback local
         const savedDir = localStorage.getItem('vespucci_contacts');
         if (savedDir) setDirectory(JSON.parse(savedDir));
         else setDirectory(CONFIG.default_directory);
 
-        // Appel API
         const res = await apiCall('getInitData', {});
         if (res.success) {
             setEmployeesList(res.employees);
-            setDirectory(res.directory); // Mise à jour avec les données du Sheet
+            setDirectory(res.directory);
         } else {
             notify('Erreur', 'Impossible de charger la liste du personnel', 'error');
-            setEmployeesList(["Mode Offline - Vérifiez API"]);
+            setEmployeesList(["Mode Offline"]);
         }
         setLoading(false);
     };
@@ -214,7 +173,6 @@ export default function VespucciInk() {
   const handleLogin = async (u) => { 
       setLoading(true); 
       const res = await apiCall('login', { user: u });
-      
       if (res.success) {
           setUser(u);
           setUserProfile(res.profile);
@@ -230,60 +188,36 @@ export default function VespucciInk() {
   const submitInvoice = async () => {
     if (!cart.length) return notify('Attention', 'Le panier est vide', 'error');
     if (!invoiceNumber) return notify('Attention', 'Numéro de facture manquant', 'error');
-    
-    const res = await apiCall('sendFactures', {
-        user, invoiceNumber, cart, totals
-    });
-
+    const res = await apiCall('sendFactures', { user, invoiceNumber, cart, totals });
     if(res.success) {
         notify('Succès', `Facture ${invoiceNumber} envoyée`, 'success');
         clearCart(); setInvoiceNumber(''); setDiscountVal(0);
         const updatedProfile = await apiCall('login', { user });
         if(updatedProfile.success) setUserProfile(updatedProfile.profile);
-    } else {
-        notify('Erreur', 'Echec de l\'envoi (API)', 'error');
-    }
+    } else { notify('Erreur', 'Echec de l\'envoi (API)', 'error'); }
   };
 
   const submitAdminForm = async () => {
     const type = activeAdminModal;
     const data = adminFormData;
-    
     if (!type) return;
     if (type === 'recrutement' && (!data.nom || !data.prenom)) return notify('Erreur', 'Nom/Prénom requis', 'error');
     if (type !== 'recrutement' && !data.target && type !== 'depense') return notify('Erreur', 'Cible manquante', 'error');
     
-    const res = await apiCall('sendHR', {
-        type, formData: data, user
-    });
-
+    const res = await apiCall('sendHR', { type, formData: data, user });
     if(res.success) {
         notify('Envoyé', 'Dossier transmis avec succès', 'success');
-        setActiveAdminModal(null);
-        setAdminFormData({});
-    } else {
-        notify('Erreur', 'Erreur lors de la transmission', 'error');
-    }
-  };
-
-  const openAdminModal = (type) => {
-    setActiveAdminModal(type);
-    setAdminFormData({}); 
+        setActiveAdminModal(null); setAdminFormData({});
+    } else { notify('Erreur', 'Erreur lors de la transmission', 'error'); }
   };
 
   const verifyPinAndUnlock = async () => {
       const res = await apiCall('verifyPin', { pin: adminPin });
       if (res.success) {
         setSuccessUnlock(true);
-        setTimeout(() => {
-            setAdminUnlocked(true);
-            setSuccessUnlock(false);
-            notify('Succès', 'Accès autorisé', 'success');
-        }, 600);
+        setTimeout(() => { setAdminUnlocked(true); setSuccessUnlock(false); notify('Succès', 'Accès autorisé', 'success'); }, 600);
       } else {
-        setShakeError(true);
-        notify('Erreur', 'Code d\'accès refusé', 'error');
-        setTimeout(() => setAdminPin(''), 400);
+        setShakeError(true); notify('Erreur', 'Code d\'accès refusé', 'error'); setTimeout(() => setAdminPin(''), 400);
       }
   };
 
@@ -291,13 +225,8 @@ export default function VespucciInk() {
     setShakeError(false);
     if (val === 'C') { setAdminPin(''); return; }
     if (val === 'DEL') { setAdminPin(prev => prev.slice(0, -1)); return; }
-    if (val === 'GO') {
-        setTimeout(() => verifyPinAndUnlock(), 10);
-        return;
-    }
-    if (adminPin.length < 8) {
-        setAdminPin(prev => prev + val.toString());
-    }
+    if (val === 'GO') { setTimeout(() => verifyPinAndUnlock(), 10); return; }
+    if (adminPin.length < 8) { setAdminPin(prev => prev + val.toString()); }
   }, [adminPin]);
 
   useEffect(() => {
@@ -319,10 +248,7 @@ export default function VespucciInk() {
       notify('Effectifs', 'Base de données mise à jour', 'success');
   };
 
-  const toggleCategory = (id) => {
-    if (activeCategory === id) setActiveCategory(null);
-    else setActiveCategory(id);
-  };
+  const toggleCategory = (id) => { if (activeCategory === id) setActiveCategory(null); else setActiveCategory(id); };
 
   // --- STYLES ---
   const styles = `
@@ -517,7 +443,7 @@ export default function VespucciInk() {
                     <Icons.User /> Mon Profil
                 </div>
                 <div className={`nav-item ${tab === 'annuaire' ? 'active' : ''}`} onClick={() => setTab('annuaire')}>
-                    <Icons.Users /> Staff
+                    <Icons.Users /> Annuaire
                 </div>
                 <div className={`nav-item ${tab === 'direction' ? 'active' : ''}`} onClick={() => setTab('direction')}>
                     <Icons.Lock /> Administration
@@ -535,7 +461,7 @@ export default function VespucciInk() {
                   {tab === 'dashboard' && 'Vue d\'ensemble'}
                   {tab === 'invoice' && 'Terminal de Vente'}
                   {tab === 'profile' && 'Mon Dossier'}
-                  {tab === 'annuaire' && 'Équipe & Planning'}
+                  {tab === 'annuaire' && 'Annuaire'}
                   {tab === 'direction' && 'Gestion Interne'}
               </div>
               <div className="user-profile">
@@ -852,12 +778,11 @@ export default function VespucciInk() {
                       </div>
                     
                     <div className="contact-grid">
-                        {/* On combine l'annuaire local et la liste API si besoin, ici on garde le local pour l'édition rapide */}
                         {directory.map((contact, i) => (
                             <div key={i} className="contact-card">
-                                {contact.photo ? <img src={contact.photo} className="contact-img" /> : <div className="contact-placeholder">{contact.nom[0]}</div>}
+                                {contact.photo ? <img src={contact.photo} className="contact-img" /> : <div className="contact-placeholder">{(contact.nom || "?")[0]}</div>}
                                 <div>
-                                    <div style={{fontWeight:600, fontSize:'1.1rem', color:'var(--text-main)'}}>{contact.prenom} {contact.nom}</div>
+                                    <div style={{fontWeight:600, fontSize:'1.1rem', color:'var(--text-main)'}}>{contact.nom}</div>
                                     <div style={{fontSize:'0.85rem', color:'var(--accent)', fontWeight:500, margin:'4px 0', textTransform:'uppercase', letterSpacing:'1px'}}>{contact.grade}</div>
                                     <div style={{fontSize:'0.9rem', color:'var(--text-muted)'}}>{contact.tel}</div>
                                 </div>
